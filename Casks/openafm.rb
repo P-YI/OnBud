@@ -1,6 +1,7 @@
 # Homebrew cask for OpenAFM. This repository is its own tap (Homebrew reads Casks/ at the repo root):
 #   brew tap p-yi/openafm https://github.com/P-YI/OpenAFM
-#   brew install --cask openafm
+#   brew trust --cask p-yi/openafm/openafm      (Homebrew 7+ loads third-party casks only once trusted)
+#   brew install --cask p-yi/openafm/openafm
 # apps/spotlight/scripts/release.sh updates version and sha256 for each release.
 cask "openafm" do
   version "0.1.0"

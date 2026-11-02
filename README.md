@@ -57,7 +57,8 @@ Optional, for single features (install them when you want the feature):
 
 ```bash
 brew tap p-yi/openafm https://github.com/P-YI/OpenAFM
-brew install --cask openafm
+brew trust --cask p-yi/openafm/openafm      # Homebrew 7+: allow this one third-party cask
+brew install --cask p-yi/openafm/openafm
 ```
 
 **DMG:** download `OpenAFM-0.1.0.dmg` from [Releases](https://github.com/P-YI/OpenAFM/releases) and drag

@@ -14,7 +14,12 @@ First public release. Apple silicon, macOS 26 or later, Apple Intelligence on.
   activity indicator.
 
 ## Install
-- Homebrew: `brew tap p-yi/openafm https://github.com/P-YI/OpenAFM && brew install --cask openafm`
+- Homebrew:
+  ```bash
+  brew tap p-yi/openafm https://github.com/P-YI/OpenAFM
+  brew trust --cask p-yi/openafm/openafm      # Homebrew 7+: allow this one third-party cask
+  brew install --cask p-yi/openafm/openafm
+  ```
 - DMG: below. The app is not signed or notarized: allow it once in System Settings > Privacy & Security > Open Anyway.
 
 ## License

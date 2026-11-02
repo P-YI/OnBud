@@ -22,5 +22,5 @@ Release v$VERSION
 Publish (manual, from the public repository):
   git commit -am "Release $VERSION" && git tag v$VERSION && git push --follow-tags
   gh release create v$VERSION apps/spotlight/$DMG --repo $REPO_SLUG --title "OpenAFM $VERSION" --notes-file docs/release-notes-$VERSION.md
-  brew tap p-yi/openafm https://github.com/$REPO_SLUG && brew install --cask openafm    # check it
+  brew tap p-yi/openafm https://github.com/$REPO_SLUG && brew trust --cask p-yi/openafm/openafm && brew install --cask p-yi/openafm/openafm    # check it
 MSG

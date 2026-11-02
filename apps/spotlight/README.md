@@ -217,7 +217,8 @@ the config restricts them. Keys you already have are never changed.
 - **`make dmg`** → `build/OpenAFM-<version>.dmg` (app + Applications link + LICENSE). **`make release`**
   (`scripts/release.sh`) also writes version and sha256 into `Casks/openafm.rb` at the repository root and
   prints the tag, `gh release create` and tap commands. It publishes nothing itself. The repository is its
-  own Homebrew tap (`brew tap p-yi/openafm https://github.com/P-YI/OpenAFM`); the cask depends on the
+  own Homebrew tap (`brew tap p-yi/openafm https://github.com/P-YI/OpenAFM`, then `brew trust --cask
+  p-yi/openafm/openafm` on Homebrew 7+); the cask depends on the
   `apfel` and `node` formulae.
 - **Gatekeeper.** The app is signed ad hoc, not notarized. On macOS 15 and later, right-click > Open no
   longer bypasses the block: users click **Open Anyway** in System Settings > Privacy & Security after the
