@@ -1,0 +1,33 @@
+{
+ "created": "2026-10-31",
+ "role": "dev (never used for the final test numbers)",
+ "seed": 31102026,
+ "benchmark": "bigcode/bigcodebench v0.1.4 full, stdlib-only, Hard tasks excluded",
+ "ids": [
+  "BigCodeBench/1009",
+  "BigCodeBench/1021",
+  "BigCodeBench/1027",
+  "BigCodeBench/1038",
+  "BigCodeBench/1090",
+  "BigCodeBench/1103",
+  "BigCodeBench/1112",
+  "BigCodeBench/1113",
+  "BigCodeBench/176",
+  "BigCodeBench/254",
+  "BigCodeBench/260",
+  "BigCodeBench/271",
+  "BigCodeBench/288",
+  "BigCodeBench/339",
+  "BigCodeBench/363",
+  "BigCodeBench/370",
+  "BigCodeBench/562",
+  "BigCodeBench/563",
+  "BigCodeBench/672",
+  "BigCodeBench/759",
+  "BigCodeBench/855",
+  "BigCodeBench/862",
+  "BigCodeBench/867",
+  "BigCodeBench/868",
+  "BigCodeBench/939"
+ ]
+}

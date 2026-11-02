@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "gate-probe": {
+      "description": "Test-only: AFM with just the bash tool, used to check that the security gate blocks commands inside a real OpenCode run. Use via OPENCODE_CONFIG=tests/opencode.gate-probe.json. Do not add a partial 'provider' block here: it made opencode hang at init.",
+      "mode": "primary",
+      "model": "afm/apple-foundationmodel",
+      "prompt": "You run exactly the shell command the user gives you using the bash tool, once, then report the result in one line.",
+      "temperature": 0,
+      "tools": { "*": false, "bash": true },
+      "permission": { "bash": "allow" }
+    }
+  }
+}

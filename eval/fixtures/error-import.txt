@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/proj/train.py", line 3, in <module>
+    from utils.metrics import f1_macro
+  File "/proj/utils/metrics.py", line 1, in <module>
+    import sklearn.metrics as skm
+ModuleNotFoundError: No module named 'sklearn'

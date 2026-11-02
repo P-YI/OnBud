@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RoutingDecision",
+  "description": "Logged for every routing decision (Phase 3 telemetry). Scores are uncalibrated.",
+  "type": "object",
+  "properties": {
+    "task_id": { "type": "string" },
+    "policy_version": { "type": "string" },
+    "policy_hash": { "type": "string" },
+    "provider": { "type": "string", "description": "rules | laya | decima" },
+    "candidates": { "type": "array", "items": { "type": "string", "enum": ["LOCAL_AFM", "FRONTIER_GPT", "FRONTIER_CLAUDE", "RUN_VERIFICATION", "ASK_USER"] } },
+    "action": { "type": "string", "enum": ["LOCAL_AFM", "FRONTIER_GPT", "FRONTIER_CLAUDE", "RUN_VERIFICATION", "ASK_USER"] },
+    "reason_code": { "type": "string" },
+    "task_type": { "type": "string" },
+    "afm_available": { "type": "boolean" },
+    "raw_scores": { "type": "object" }
+  },
+  "required": ["task_id", "policy_version", "provider", "candidates", "action", "reason_code", "task_type", "afm_available"],
+  "additionalProperties": false
+}

@@ -1,0 +1,42 @@
+# Executable routing policy. Human rationale: ROUTING.md. Changes need a version bump and user review.
+version: routing-v0.8
+
+afm:
+  max_input_tokens: 5500     # capsule budget inside the measured 8192 context
+  max_files: 1               # edits touching more files go to frontier
+  max_rounds: 4              # guided tool-selection rounds per task
+  max_tool_calls: 6
+  timeout_ms: 30000
+
+frontier:
+  default: FRONTIER_GPT
+
+decision:                    # learned scorer next to the rules (routing-v0.5); hard rules always win
+  decima_mode: advise        # off | shadow (log only, no latency) | advise (may change generic routes); routing-v0.6
+  decima_url: http://127.0.0.1:11436     # Ollaya on 11436: 11435 is the AFM agent server
+  decima_model: decima:agent
+  decima_model_digest: e14e614ce4ab   # routing-v0.8: thresholds below were calibrated on this version; another one runs in shadow
+  decima_timeout_ms: 4000
+  decima_min_confidence: 0.6 # uncalibrated score, not a probability      # codex agent (GPT-6.1 Sol, ChatGPT subscription)
+  decima_code_hard_threshold: 0.2   # routing-v0.7: code tasks scored ≥ 0.2 go to Codex first (dev splits: local 1/9)
+
+local_task_types:
+  - error_summary
+  - code_explain
+  - diff_summary
+  - small_edit
+  - document_overview      # folder listing/description: deterministic pipeline (routing-v0.4)
+  - document_question      # questions about a PDF/Word/slide file
+  - other                  # general questions/chat: AFM is the default agent since routing-v0.3
+
+always_frontier:
+  - multi_file_change
+  - design
+
+skills:                      # one skill per request, injected after AFM.md
+  error_summary: error-triage
+  code_explain: code-explain
+  diff_summary: diff-review
+  small_edit: small-edit
+  document_overview: doc-inventory
+  document_question: doc-question

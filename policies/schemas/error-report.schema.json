@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ErrorReport",
+  "type": "object",
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": ["syntax", "import", "type", "runtime", "test_failure", "dependency", "config", "unknown"]
+    },
+    "summary": { "type": "string" },
+    "likely_location": { "type": "string" },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "escalate": { "type": "boolean" }
+  },
+  "required": ["category", "summary", "likely_location", "confidence", "escalate"],
+  "additionalProperties": false
+}

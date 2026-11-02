@@ -1,0 +1,11 @@
+{
+  "name": "adaptive-coding-agent",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "test": "node --experimental-strip-types --experimental-sqlite --no-warnings --test 'tests/**/*.test.ts'",
+    "doctor": "scripts/doctor.sh",
+    "smoke:apfel": "scripts/apfel-smoke.sh"
+  }
+}

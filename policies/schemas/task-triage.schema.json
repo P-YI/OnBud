@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaskTriage",
+  "type": "object",
+  "properties": {
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "error_summary",
+        "code_explain",
+        "diff_summary",
+        "small_edit",
+        "multi_file_change",
+        "design",
+        "document_question",
+        "document_overview",
+        "other"
+      ]
+    },
+    "escalate": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_type",
+    "escalate",
+    "reason"
+  ],
+  "additionalProperties": false
+}

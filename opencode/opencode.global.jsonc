@@ -1,0 +1,141 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // OpenAFM hybrid agent — global so AFM is available in every project.
+  // Source of truth for prompts/policies: ~/OpenAFM/adaptive-coding-agent (git). Backup of the
+  // previous (empty) file: ~/OpenAFM/runtime/reports/opencode.jsonc.global-backup-*
+  "enabled_providers": ["afm", "afm-agent", "openai", "opencode"],
+  "default_agent": "afm",
+  // The v2 desktop app starts new sessions with the top-level model rather than default_agent,
+  // so the default model is the AFM controller too. codex keeps GPT-6.1 Sol via its own agent model.
+  "model": "afm-agent/afm-controller",
+  "small_model": "afm/apple-foundationmodel",
+  "provider": {
+    "afm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Apple Foundation Model (on-device)",
+      "options": {
+        "baseURL": "http://127.0.0.1:11434/v1",
+        "apiKey": "{file:~/OpenAFM/config/apfel.token}"
+      },
+      "models": {
+        "apple-foundationmodel": {
+          "name": "AFM on-device (raw)",
+          "limit": { "context": 8192, "output": 2048 },
+          "tool_call": false
+        }
+      }
+    },
+    "afm-agent": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "AFM agent (OpenAFM controller)",
+      "options": {
+        "baseURL": "http://127.0.0.1:11435/v1",
+        "apiKey": "{file:~/OpenAFM/config/apfel.token}"
+      },
+      "models": {
+        "afm-controller": {
+          "name": "AFM agent (local)",
+          // Not AFM's 8k window: the controller builds its own bounded context per turn (last turns +
+          // ≤5.5k-token capsule). Declaring 8k made OpenCode auto-compact after one long answer,
+          // because it counts its own ~12.5k-char system prompt against this limit.
+          "limit": { "context": 200000, "output": 4096 },
+          "tool_call": false
+        }
+      }
+    }
+  },
+  "permission": {
+    "edit": "ask",
+    "bash": {
+      "*": "ask",
+      "rm -rf*": "deny",
+      "rm -fr*": "deny",
+      "rm -r *": "deny",
+      "sudo *": "deny",
+      "git reset --hard*": "deny",
+      "git clean -f*": "deny",
+      "git push --force*": "deny",
+      "git push -f*": "deny",
+      "git checkout -- *": "deny",
+      "chmod -R*": "deny",
+      "chown -R*": "deny",
+      "dd *": "deny",
+      "diskutil *": "deny",
+      "security *": "deny",
+      "* | sh": "deny",
+      "* | bash": "deny",
+      "* | zsh": "deny",
+      "cat .env*": "deny",
+      "cat ~/.ssh/*": "deny",
+      "ls*": "allow",
+      "pwd": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "rg *": "allow"
+    },
+    "webfetch": "ask",
+    "websearch": "ask",
+    "external_directory": "deny",
+    "doom_loop": "ask"
+  },
+  // Local AFM tools for frontier agents (codex): document reading/OCR, finder, on-device summaries and
+  // drafts, offline LaTeX checks. Read-only; the afm/afm-local agents have their tools disabled anyway.
+  "mcp": {
+    "openafm": {
+      "type": "local",
+      "command": ["/bin/bash", "{env:HOME}/OpenAFM/adaptive-coding-agent/scripts/node-run.sh", "{env:HOME}/OpenAFM/adaptive-coding-agent/bin/afm-mcp-server.ts"],
+      "enabled": true,
+      "timeout": 120000
+    }
+  },
+  "agent": {
+    "afm": {
+      "description": "On-device AFM agent: searches the project (rg/git/Spotlight), answers small tasks locally, tells you when to switch to codex.",
+      "mode": "primary",
+      "model": "afm-agent/afm-controller",
+      "prompt": "Handled by the local AFM controller.",
+      "tools": { "*": false }
+    },
+    "codex": {
+      "description": "Frontier coding agent: GPT-6.1 Sol via ChatGPT Pro subscription (Codex usage).",
+      "mode": "primary",
+      "model": "openai/gpt-6.1-sol",
+      "variant": "medium"
+    },
+    "codex-handoff": {
+      "description": "Read-only Codex used when you approve an AFM hand-off. Cannot edit files or run arbitrary commands.",
+      "mode": "primary",
+      "hidden": true,
+      "model": "openai/gpt-6.1-sol",
+      "variant": "medium",
+      "permission": {
+        "edit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "bash": { "*": "deny", "ls*": "allow", "pwd": "allow", "git status*": "allow", "git diff*": "allow", "git log*": "allow", "rg *": "allow" }
+      }
+    },
+    // Lean code agent for AFM hand-offs that only need code back (no tools, one-line prompt): the
+    // codex-handoff agent's tool definitions and system prompt are ~5k input tokens per call.
+    "codex-solve": {
+      "description": "Code-only Codex for AFM hand-offs: returns code, no tools.",
+      "mode": "primary",
+      "hidden": true,
+      "model": "openai/gpt-6.1-sol",
+      "variant": "medium",
+      "prompt": "You write correct, complete code. Reply with only the code block asked for.",
+      "tools": { "*": false }
+    },
+    "afm-local": {
+      "description": "Short, bounded tasks on the on-device Apple model. No tools.",
+      "mode": "primary",
+      "model": "afm/apple-foundationmodel",
+      "prompt": "{file:~/OpenAFM/adaptive-coding-agent/policies/AFM.md}",
+      "temperature": 0,
+      "tools": { "*": false }
+    },
+    "build": { "variant": "medium" },
+    "plan": { "variant": "medium" }
+  }
+}

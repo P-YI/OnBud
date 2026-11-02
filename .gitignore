@@ -1,0 +1,28 @@
+# Runtime data lives in ../runtime (outside this repo); guard against accidental copies.
+runtime/
+*.sqlite
+*.sqlite-*
+*.db
+*.log
+*.jsonl
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+auth.json
+
+# Model weights / caches
+*.safetensors
+*.gguf
+*.bin
+.cache/
+
+# Tooling
+node_modules/
+__pycache__/
+.venv/
+.DS_Store
+!tools/bench/ml-impl.jsonl
+!tools/bench/ml-impl-holdout.jsonl
