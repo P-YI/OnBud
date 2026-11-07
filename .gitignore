@@ -26,3 +26,6 @@ __pycache__/
 .DS_Store
 !tools/bench/ml-impl.jsonl
 !tools/bench/ml-impl-holdout.jsonl
+
+# public skill eval cases are part of the repository (private cases live in ~/OnBud/runtime/evals/private)
+!skills/*/evals/cases.jsonl

@@ -15,7 +15,7 @@ import { readLog } from "../services/maintenance/housekeeping.ts";
 
 const args = process.argv.slice(2);
 const opt = (k: string, d: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
-const R = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime");
+const R = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime");
 const MAX_LOCAL = Number(opt("--max-local", "0.15")), MIN_REAL = Number(opt("--min-real", "30")), TAG = opt("--dev-tag", "v3dev"), BENCH = opt("--bench", "");
 const lines = (f: string) => readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return undefined; } }).filter(Boolean);
 

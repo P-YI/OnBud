@@ -30,7 +30,7 @@ test("memory: recall by relevance, Korean short terms, dedupe, links, forget", (
   const m = new MemoryStore(openDb(":memory:"));
   const p = "proj";
   m.remember(p, { kind: "file_summary", text: "석사 학위논문: 언어 모델의 시간 지식 평가", paths: ["thesis.pdf"], keywords: ["thesis"] });
-  m.remember(p, { kind: "episode", text: "Q: MedHopQA manuscript about biomedical QA", paths: ["MedHopQA.doc"] });
+  m.remember(p, { kind: "episode", text: "Q: ProjectQA manuscript about biomedical QA", paths: ["ProjectQA.doc"] });
   m.remember(p, { kind: "lesson", text: "Local AFM could not finish a design task", keywords: ["design"] });
   assert.equal(m.recall(p, "학위논문 내용 알려줘")[0].paths![0], "thesis.pdf");
   assert.equal(m.recall(p, "논문")[0].paths![0], "thesis.pdf");          // 2-char Korean term via LIKE fallback

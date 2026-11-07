@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 # One command for the benchmark (tools/bench/BENCHMARK.md): task suite for the chosen settings, optionally the code
-# benchmarks (current pipeline, tag v4) and BFCL, then the report.
-#   run-suite.sh [--public] [--settings s2,s3,s1,codex] [--code] [--bfcl] [--tag name]
+# benchmarks, then the report.
+#   run-suite.sh [--public] [--settings s2,s3,s1,codex] [--code] [--tag name]
 # AFM-bound runs go one after another (apfel serves one request at a time).
 set -u
 cd "$(dirname "$0")/../.."
 N="node --experimental-strip-types --experimental-sqlite --no-warnings"
-L="${OPENAFM_HOME:-$HOME/OpenAFM}/runtime/bench/logs"; mkdir -p "$L"
+L="${ONBUD_HOME:-$HOME/OnBud}/runtime/bench/logs"; mkdir -p "$L"
 S=tools/bench/subsets
-PUBLIC=""; SETTINGS="s2,s3,s1"; CODE=0; BFCL=0; TAG="suite"
+PUBLIC=""; SETTINGS="s2,s3,s1"; CODE=0; TAG="suite"
 while [ $# -gt 0 ]; do
   case "$1" in
     --public) PUBLIC="--public" ;;
     --settings) SETTINGS="$2"; shift ;;
     --code) CODE=1 ;;
-    --bfcl) BFCL=1 ;;
     --tag) TAG="$2"; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
@@ -43,10 +42,6 @@ if [ "$CODE" = 1 ]; then
       grep "pass@1" "$L/suite-code-$1-$s.log"
     done
   done
-fi
-
-if [ "$BFCL" = 1 ]; then
-  bash tools/bench/fetch-bfcl.sh > "$L/suite-fetch-bfcl.log" 2>&1 && $N tools/bench/bfcl-eval.ts --n 20 --methods native,twostep,hybrid > "$L/suite-bfcl.log" 2>&1
 fi
 
 $N tools/bench/report-eval.ts --fw-tag "$TAG" > /dev/null && echo "report: docs/benchmark-results-$(date +%F).md"

@@ -1,0 +1,41 @@
+{
+  "id": "writing",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "LaTeX papers offline (compile, references, CSV tables, masked prose polishing), short drafts and summaries with the on-device model, and translation.",
+  "examples": [
+    "논문 컴파일해서 에러 알려줘",
+    "results.csv를 LaTeX 표로 만들어줘",
+    "Translate notes.md into Korean"
+  ],
+  "reasonCodes": [
+    "local_latex_compile",
+    "local_latex_refs",
+    "local_latex_table",
+    "local_latex_polish",
+    "latex_no_main",
+    "local_translate"
+  ],
+  "capabilities": [
+    "read",
+    "propose"
+  ],
+  "lane": "contained",
+  "egress": "none",
+  "checks": [
+    "latex_compiles",
+    "latex_keys_kept",
+    "reply_language"
+  ],
+  "budget": {
+    "afmCalls": 4,
+    "latencyMs": 120000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "translate": [
+      "Translate notes.md into English",
+      "readme를 한국어로 번역해줘"
+    ]
+  }
+}

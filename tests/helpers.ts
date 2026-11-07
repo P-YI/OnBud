@@ -1,5 +1,5 @@
-process.env.OPENAFM_DECIMA_MODE ??= "off";   // tests must not depend on a running Ollaya
-process.env.OPENAFM_FRONTIER ??= "off";
+process.env.ONBUD_DECIMA_MODE ??= "off";   // tests must not depend on a running Ollaya
+process.env.ONBUD_FRONTIER ??= "off";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

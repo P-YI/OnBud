@@ -6,10 +6,10 @@ test("web requests and kinds", () => {
   assert.ok(isWebRequest("PCC 컨텍스트 크기를 웹에서 찾아줘"));
   assert.ok(isWebRequest("search the web for apfel releases"));
   assert.ok(!isWebRequest(".cache 폴더 찾아줘"));
-  assert.ok(!isWebRequest("kcc2026_final.pdf는 몇 쪽이야?"));
+  assert.ok(!isWebRequest("conf2026_final.pdf는 몇 쪽이야?"));
   for (const p of ["show the latest commit", "is this repo online?", "news.py 파일 설명해줘", "최신 커밋 보여줘"]) assert.ok(!isWebRequest(p), p);
   for (const p of ["PCC 최신 정보 웹에서 찾아줘", "LLM 최신 동향 알려줘", "구글에서 apfel 찾아줘", "인터넷으로 검색해줘"]) assert.ok(isWebRequest(p), p);
-  assert.equal(kindFor("temporal heads 관련 논문 웹에서 찾아줘"), "papers");
+  assert.equal(kindFor("sparse attention 관련 논문 웹에서 찾아줘"), "papers");
   assert.equal(kindFor("RAG가 뭔지 위키에서 찾아줘"), "encyclopedia");
   assert.equal(kindFor("apfel 최신 버전 웹에서 확인해줘"), "general");
 });

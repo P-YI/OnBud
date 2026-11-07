@@ -1,12 +1,12 @@
 # Third-party software and references
 
-OpenAFM is licensed under the MIT License (see `LICENSE`). That license covers OpenAFM's own code only.
+OnBud is licensed under the MIT License (see `LICENSE`). That license covers OnBud's own code only.
 Everything below keeps its own license.
 
-## What the OpenAFM app ships
+## What the OnBud app ships
 
 - The launcher app (`apps/spotlight`), the controller (`bin/`, `services/`, `policies/`, `scripts/`,
-  `opencode/`) and the helpers `tools/pdftext` and `tools/translate` are OpenAFM's own code. The app
+  `opencode/`) and the helpers `tools/pdftext` and `tools/translate` are OnBud's own code. The app
   bundles a copy of the controller so that setup does not need a git checkout.
 - No third-party code or model weights are bundled. The helpers link only Apple system frameworks
   (FoundationModels, Translation, Vision, PDFKit, AppKit, SwiftUI, WidgetKit), which stay under Apple's
@@ -23,20 +23,24 @@ They come from their own projects, under their own licenses. Please support and 
 | Node.js | runs the controller (core) | MIT | https://nodejs.org · `brew install node` |
 | Homebrew | installs apfel and Node | BSD-2-Clause | https://brew.sh |
 | OpenCode | Codex plugin: hands big tasks to Codex | MIT | https://opencode.ai |
+| GitHub Copilot language server (`@github/copilot-language-server`) | Copilot tier: inline code completion with the user's own Copilot plan | MIT (the package); the Copilot service is under GitHub's terms and the user's plan | https://www.npmjs.com/package/@github/copilot-language-server |
 | Ollaya | Router model plugin: serves the router model | Apache-2.0 | https://github.com/ollaya-dev/ollaya |
 | Decima (`decima:agent`) | default router model | Apache-2.0 model; part of its training data is CC BY-NC, so check before any commercial use | https://ollaya.dev/library/decima |
 | SearXNG | Web search plugin (optional local search engine) | AGPL-3.0 | https://github.com/searxng/searxng |
 | MacTeX / TeX Live | LaTeX plugin | several free licenses (TeX Live) | https://www.tug.org/mactex/ |
 | ripgrep, tmux | faster code search; background sessions (optional) | MIT/Unlicense; ISC | https://github.com/BurntSushi/ripgrep · https://github.com/tmux/tmux |
+| GitHub CLI (`gh`) | read-only GitHub status (optional) | MIT | https://cli.github.com |
+| Fresh (`fresh-editor`) | Remote server plugin: shows a server folder as a terminal IDE (`fresh ssh://host/dir`); started as a separate program, not linked or bundled | GPL-3.0 | https://github.com/sinelaw/fresh · `brew install fresh-editor` |
+| TTT | Remote server plugin (optional): a terminal IDE the user installs on the server; started over `ssh -t` | MIT | https://github.com/eugenioenko/ttt |
 
 Apple Intelligence, the Foundation Models framework and Apple's translation models are part of macOS and
-are used under Apple's terms. OpenAFM uses them on-device through apfel and the public frameworks; it does
-not use Apple's `fm` command-line tool or Private Cloud Compute. Anyone extending OpenAFM in that direction
+are used under Apple's terms. OnBud uses them on-device through apfel and the public frameworks; it does
+not use Apple's `fm` command-line tool or Private Cloud Compute. Anyone extending OnBud in that direction
 must read Apple's terms first (see the README).
 
 ## Design references
 
-OpenAFM took ideas from these projects and reimplemented them; no code was copied from them. What was
+OnBud took ideas from these projects and reimplemented them; no code was copied from them. What was
 adopted is summarized in `docs/OVERVIEW.md` (Design references).
 
 | Project | Idea taken |
@@ -54,6 +58,14 @@ adopted is summarized in `docs/OVERVIEW.md` (Design references).
 ## Benchmarks (evaluation only)
 
 `tools/bench` fetches these datasets at run time. The repository stores only task IDs and its own results:
-HumanEval (MIT, https://github.com/openai/human-eval), BigCodeBench (Apache-2.0), LiveCodeBench,
-the Berkeley Function-Calling Leaderboard (BFCL) and Terminal-Bench. The `ml-impl` tasks in `tools/bench`
-were written for OpenAFM.
+HumanEval (MIT, https://github.com/openai/human-eval), BigCodeBench (Apache-2.0) and LiveCodeBench
+(https://livecodebench.github.io). The v0.1.0 release also used BFCL and a Terminal-Bench-style suite. The `ml-impl` tasks in `tools/bench`
+were written for OnBud.
+
+## Training data (weights shipped)
+
+`skills/code/difficulty.json` (the code skill's difficulty classifier) holds logistic-regression weights over
+hashed word features, trained by `tools/code-difficulty/train.py` on the problem descriptions and ratings of
+DeepMind CodeContests (https://huggingface.co/datasets/deepmind/code_contests), licensed CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/). No text from the dataset is stored in the repository; the
+training script reads the dataset at run time.

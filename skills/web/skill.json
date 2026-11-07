@@ -1,0 +1,36 @@
+{
+  "id": "web",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Web search after the user approves the query (SearXNG on this Mac, or DuckDuckGo Lite, arXiv and Wikipedia), with the pages that were read cited.",
+  "examples": [
+    "웹에서 Apple Foundation Models 최신 소식 찾아줘",
+    "Search the web for SearXNG JSON API"
+  ],
+  "reasonCodes": [
+    "web_disabled",
+    "web_search_needs_approval",
+    "local_browser_tab"
+  ],
+  "capabilities": [
+    "read",
+    "network"
+  ],
+  "lane": "contained",
+  "egress": "query",
+  "checks": [
+    "claims_have_source",
+    "reply_language"
+  ],
+  "budget": {
+    "afmCalls": 4,
+    "latencyMs": 60000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "browser_tab": [
+      "What page am I looking at in Safari?",
+      "지금 열린 탭 주소 알려줘"
+    ]
+  }
+}

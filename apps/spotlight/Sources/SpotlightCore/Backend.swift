@@ -1,13 +1,13 @@
-// Finds what is already installed: apfel (AFM, 11434), the OpenAFM controller (11435), Decima on
-// Ollaya (11436), the ~/OpenAFM checkout and its LaunchAgents. Probes loopback only and installs nothing.
+// Finds what is already installed: apfel (AFM, 11434), the OnBud controller (11435), Decima on
+// Ollaya (11436), the ~/OnBud checkout and its LaunchAgents. Probes loopback only and installs nothing.
 import Foundation
 
-public struct OpenAFMPaths: Sendable {
-    public let home: URL            // ~/OpenAFM (or $OPENAFM_HOME)
+public struct OnBudPaths: Sendable {
+    public let home: URL            // ~/OnBud (or $ONBUD_HOME)
     public init(home: URL? = nil) {
         if let home { self.home = home }
-        else if let env = ProcessInfo.processInfo.environment["OPENAFM_HOME"], !env.isEmpty { self.home = URL(fileURLWithPath: env) }
-        else { self.home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("OpenAFM") }
+        else if let env = ProcessInfo.processInfo.environment["ONBUD_HOME"], !env.isEmpty { self.home = URL(fileURLWithPath: env) }
+        else { self.home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("OnBud") }
     }
     public var repo: URL { home.appendingPathComponent("adaptive-coding-agent") }
     public var token: URL { home.appendingPathComponent("config/apfel.token") }
@@ -26,19 +26,19 @@ public enum Port {
 
 public struct BackendStatus: Sendable, Equatable {
     public var apfel = false             // AFM answers /health
-    public var controller = false        // OpenAFM controller answers /health
+    public var controller = false        // OnBud controller answers /health
     public var decima = false            // Ollaya answers
     public var searxng = false           // local SearXNG answers (web search plugin)
-    public var checkout = false          // ~/OpenAFM/adaptive-coding-agent exists
-    public var token = false             // ~/OpenAFM/config/apfel.token readable
+    public var checkout = false          // ~/OnBud/adaptive-coding-agent exists
+    public var token = false             // ~/OnBud/config/apfel.token readable
     public var tokenPrivate = false      // …and not readable by other users (mode 600)
-    public var agentLaunchAgent = false  // dev.openafm.agent
-    public var apfelLaunchAgent = false  // dev.openafm.apfel
+    public var agentLaunchAgent = false  // dev.onbud.agent
+    public var apfelLaunchAgent = false  // dev.onbud.apfel
     public init() {}
 
     /** The launcher can work: the controller is up and we can authenticate to it. */
     public var usable: Bool { controller && token }
-    /** Nothing of OpenAFM on this Mac → setup screen. */
+    /** Nothing of OnBud on this Mac → setup screen. */
     public var nothingInstalled: Bool { !checkout && !controller && !apfel && !agentLaunchAgent }
 }
 
@@ -55,7 +55,7 @@ public enum Backend {
         } catch { return false }
     }
 
-    public static func probe(paths: OpenAFMPaths = OpenAFMPaths()) async -> BackendStatus {
+    public static func probe(paths: OnBudPaths = OnBudPaths()) async -> BackendStatus {
         async let a = reachable(Port.apfel, "/health")
         async let c = reachable(Port.controller, "/health")
         async let d = reachable(Port.decima, "/api/tags")
@@ -66,8 +66,8 @@ public enum Backend {
         s.token = paths.readToken() != nil
         let mode = ((try? FileManager.default.attributesOfItem(atPath: paths.token.path))?[.posixPermissions] as? NSNumber)?.intValue ?? 0o777
         s.tokenPrivate = s.token && mode & 0o077 == 0
-        s.agentLaunchAgent = fm.fileExists(atPath: OpenAFMPaths.launchAgent("dev.openafm.agent").path)
-        s.apfelLaunchAgent = fm.fileExists(atPath: OpenAFMPaths.launchAgent("dev.openafm.apfel").path)
+        s.agentLaunchAgent = fm.fileExists(atPath: OnBudPaths.launchAgent("dev.onbud.agent").path)
+        s.apfelLaunchAgent = fm.fileExists(atPath: OnBudPaths.launchAgent("dev.onbud.apfel").path)
         s.apfel = await a; s.controller = await c; s.decima = await d; s.searxng = await w
         return s
     }
@@ -116,7 +116,7 @@ public struct RouterPin: Sendable, Equatable {
     public let model: String, digestPrefix: String
     public init(model: String, digestPrefix: String) { self.model = model; self.digestPrefix = digestPrefix }
 
-    public static func load(paths: OpenAFMPaths = OpenAFMPaths()) -> RouterPin? {
+    public static func load(paths: OnBudPaths = OnBudPaths()) -> RouterPin? {
         guard let y = try? String(contentsOf: paths.repo.appendingPathComponent("policies/routing.yaml"), encoding: .utf8) else { return nil }
         return parse(y)
     }

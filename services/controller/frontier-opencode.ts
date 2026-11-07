@@ -29,7 +29,9 @@ export class OpenCodeFrontier implements FrontierProvider {
     const agent = this.agent === "codex-handoff" && selfContained(prompt) ? "codex-solve" : this.agent;
     return new Promise((res) => {
       const child = execFile(this.bin, ["run", "--agent", agent, "--format", "json", prompt],
-        { cwd: root, timeout: this.timeoutMs, maxBuffer: 16 * 1024 * 1024 },
+        // PWD too: opencode takes its project directory from PWD, so without it the child ran as the parent's
+        // directory (found 2026-11-08: an agent added to the global config was "not found" from the repo's cached project)
+        { cwd: root, env: { ...process.env, PWD: root }, timeout: this.timeoutMs, maxBuffer: 16 * 1024 * 1024 },
         (err: any, stdout) => {
           const texts: string[] = [];
           let tokens: { input: number; output: number; reasoning: number; cacheRead: number } | undefined;
@@ -61,10 +63,10 @@ export function selfContained(handoff: string): boolean {
 }
 
 // Is a frontier model reachable right now? (network + ChatGPT endpoint). Cached for 30 s.
-// OPENAFM_FRONTIER=off forces "offline" (benchmark settings, or working on a plane).
+// ONBUD_FRONTIER=off forces "offline" (benchmark settings, or working on a plane).
 let reach = { at: 0, ok: false };
 export async function frontierReachable(): Promise<boolean> {
-  if (process.env.OPENAFM_FRONTIER === "off") return false;
+  if (process.env.ONBUD_FRONTIER === "off") return false;
   if (Date.now() - reach.at < 30_000) return reach.ok;
   let ok = false;
   try { const r = await fetch("https://chatgpt.com/", { method: "HEAD", signal: AbortSignal.timeout(2500) }); ok = r.status > 0; } catch { ok = false; }

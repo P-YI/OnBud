@@ -1,0 +1,59 @@
+{
+  "id": "code",
+  "version": "0.2.0",
+  "contract": "1.1",
+  "description": "Code edits and local code jobs on their own branch, code generation with GitHub Copilot's inline completion (S5) checked by the examples, the project's tests and a stress test (brute force and random inputs for contest-style code and retries); contest-style code goes to Copilot only when a bundled difficulty classifier calls it easy, docstrings, error triage, renames, code explanation. Copilot sends the code it completes to GitHub (egress).",
+  "examples": [
+    "src/stats.py의 mean 함수가 평균을 잘못 계산해. 고쳐줘",
+    "textutil.py의 slugify 함수를 구현해줘",
+    "What does detectLocalSkill do?"
+  ],
+  "reasonCodes": [
+    "local_small_edit",
+    "local_job",
+    "local_job_offline",
+    "job_plan_failed",
+    "decima_code_hard",
+    "algorithmic_code",
+    "hard_contest",
+    "unverifiable_code",
+    "afm_edit_failed_tests",
+    "local_code_explain",
+    "local_error_summary",
+    "local_error_triage",
+    "local_docstrings",
+    "local_rename",
+    "read_only_job",
+    "edit_*"
+  ],
+  "capabilities": [
+    "read",
+    "propose",
+    "job",
+    "network"
+  ],
+  "lane": "wide",
+  "egress": "capsule",
+  "checks": [
+    "tests_pass",
+    "stress_pass",
+    "diff_in_plan",
+    "no_stub",
+    "reply_language"
+  ],
+  "budget": {
+    "afmCalls": 12,
+    "latencyMs": 300000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "docstrings": [
+      "Add docstrings to the functions in utils.py",
+      "app.py 함수들에 독스트링 달아줘"
+    ],
+    "error_triage": [
+      "Why did this build fail? Look at build.log",
+      "에러 로그 보고 원인 알려줘"
+    ]
+  }
+}

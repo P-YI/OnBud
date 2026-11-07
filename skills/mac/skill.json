@@ -1,0 +1,57 @@
+{
+  "id": "mac",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Opening apps, terminals and editors (the user's own choice, Ghostty included), launching apps by name, this Mac's health, command help, and running a command the user approves.",
+  "examples": [
+    "Downloads 폴더에서 터미널 열어줘",
+    "Check the health of my Mac",
+    "git rebase 사용법 알려줘"
+  ],
+  "reasonCodes": [
+    "local_open_app",
+    "local_launch_app",
+    "local_mac_health",
+    "local_help",
+    "command_needs_approval",
+    "read_only_app",
+    "explicit_command_*",
+    "local_mac_control"
+  ],
+  "capabilities": [
+    "read",
+    "propose",
+    "run_approved"
+  ],
+  "lane": "contained",
+  "egress": "none",
+  "checks": [
+    "app_opened",
+    "reply_language"
+  ],
+  "budget": {
+    "afmCalls": 2,
+    "latencyMs": 20000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "mac_health": [
+      "How is my MacBook doing? battery, disk and memory",
+      "내 맥 배터리랑 저장 공간 괜찮아?",
+      "Is my computer running low on disk space?"
+    ],
+    "open_app": [
+      "Open a terminal in this folder",
+      "이 폴더를 에디터로 열어줘"
+    ],
+    "launch_app": [
+      "Launch Safari",
+      "캘린더 앱 실행해줘"
+    ],
+    "mac_control": [
+      "Turn on dark mode",
+      "볼륨 30으로 줄여줘",
+      "Take a screenshot"
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "personal",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Calendar events and Reminders on this Mac, read-only (EventKit). Off until the user turns it on; shown to the user only, never stored, logged or handed off.",
+  "examples": [
+    "What's on my calendar today?",
+    "이번 주 일정 알려줘"
+  ],
+  "reasonCodes": [
+    "local_personal"
+  ],
+  "capabilities": [
+    "read"
+  ],
+  "lane": "contained",
+  "egress": "none",
+  "private": true,
+  "checks": [
+    "reply_language"
+  ],
+  "budget": {
+    "afmCalls": 0,
+    "latencyMs": 30000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "personal": [
+      "Do I have any meetings tomorrow?",
+      "오늘 남은 미리 알림 보여줘",
+      "List my reminders"
+    ]
+  }
+}

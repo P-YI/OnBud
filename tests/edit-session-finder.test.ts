@@ -4,7 +4,7 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.OPENAFM_HOME = mkdtempSync(join(tmpdir(), "openafm-home-"));
+process.env.ONBUD_HOME = mkdtempSync(join(tmpdir(), "onbud-home-"));
 const { applyEdit, applyToProject, detectTestCommand, proposeEdit, trialEdit, sha } = await import("../services/controller/edit-loop.ts");
 const { isFindRequest, nameTerms, kindFromPrompt, isPrivate, fileUrl, findByName } = await import("../services/context-builder/finder.ts");
 const S = await import("../services/context-builder/sessions.ts");
@@ -36,6 +36,8 @@ test("test command detection: unittest when pytest is absent, matching test file
   const cmd = detectTestCommand(root, "calc.py")!;
   assert.match(cmd, /-m (pytest -q -x tests\/test_calc\.py|unittest -q tests\.test_calc)$/);
   assert.equal(detectTestCommand(makeRepo({ "README.md": "x" })), undefined);
+  // test files at the project root, no path given (the controller's routing asks this way)
+  assert.match(detectTestCommand(makeRepo({ "m.py": "x = 1\n", "test_m.py": "import unittest\n" }))!, /-m (pytest -q -x|unittest discover -q)$/);
 });
 
 test("sandbox trial: failing edit fails, correct edit passes, real file untouched until applied", async () => {
@@ -51,7 +53,7 @@ test("sandbox trial: failing edit fails, correct edit passes, real file untouche
   assert.equal(t2.ok, true, t2.result?.output);
   assert.match(t2.diff, /-    return a - b\n\+    return a \+ b/);
   assert.equal(readFileSync(join(root, "calc.py"), "utf8"), before);           // sandbox only
-  assert.deepEqual(readdirSync(join(process.env.OPENAFM_HOME!, "runtime", "sandbox")), []);   // clone removed
+  assert.deepEqual(readdirSync(join(process.env.ONBUD_HOME!, "runtime", "sandbox")), []);   // clone removed
   const syntax = await trialEdit(root, { ...bad, newText: "    return (a +" }, testCmd);
   assert.equal(syntax.stage, "syntax");
   assert.deepEqual(applyToProject(root, good), { ok: true });
@@ -93,16 +95,16 @@ test("controller small_edit: diff + sandbox offer, AFM edit never applied direct
 
 test("find requests: detection, name terms, kinds, privacy filter, Finder URLs", async () => {
   assert.ok(isFindRequest(".cache 폴더 찾아줘"));
-  assert.ok(isFindRequest("ChroKnow pdf 파일 어디 있어?"));
+  assert.ok(isFindRequest("TimeShift pdf 파일 어디 있어?"));
   assert.ok(isFindRequest("find the file routing.yaml"));
   assert.ok(!isFindRequest("where is f1_macro defined"));
   assert.ok(!isFindRequest("3 더하기 4는?"));
   assert.deepEqual(nameTerms(".cache 폴더 찾아줘"), [".cache"]);
   assert.deepEqual(nameTerms("find my huggingface cache folder"), ["huggingface", "cache"]);
-  assert.equal(kindFromPrompt("ChroKnow pdf 파일 어디 있어?"), "pdf");
+  assert.equal(kindFromPrompt("TimeShift pdf 파일 어디 있어?"), "pdf");
   assert.equal(kindFromPrompt(".cache 폴더 찾아줘"), "folder");
   const h = homedir();
-  for (const p of [".ssh/id_ed25519", ".zsh_history", "Library/Mail/V10", ".codex/auth.json", "OpenAFM/config/apfel.token", "proj/.env", "x/api_token.txt"]) assert.ok(isPrivate(join(h, p)), p);
+  for (const p of [".ssh/id_ed25519", ".zsh_history", "Library/Mail/V10", ".codex/auth.json", "OnBud/config/apfel.token", "proj/.env", "x/api_token.txt"]) assert.ok(isPrivate(join(h, p)), p);
   for (const p of [".cache/huggingface", "Desktop/paper.pdf", ".config/opencode"]) assert.ok(!isPrivate(join(h, p)), p);
   assert.equal(fileUrl("/Users/a/My Docs (old)", true), "file:///Users/a/My%20Docs%20%28old%29/");
   const found = await findByName([".ssh", "id_ed25519"], { max: 5 });

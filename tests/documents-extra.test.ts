@@ -5,11 +5,11 @@ import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-process.env.OPENAFM_HOME = mkdtempSync(join(tmpdir(), "openafm-home-"));
-const realPdftext = join(homedir(), "OpenAFM", "runtime", "bin", "pdftext");
+process.env.ONBUD_HOME = mkdtempSync(join(tmpdir(), "onbud-home-"));
+const realPdftext = join(homedir(), "OnBud", "runtime", "bin", "pdftext");
 if (existsSync(realPdftext)) {
-  mkdirSync(join(process.env.OPENAFM_HOME, "runtime", "bin"), { recursive: true });
-  symlinkSync(realPdftext, join(process.env.OPENAFM_HOME, "runtime", "bin", "pdftext"));
+  mkdirSync(join(process.env.ONBUD_HOME, "runtime", "bin"), { recursive: true });
+  symlinkSync(realPdftext, join(process.env.ONBUD_HOME, "runtime", "bin", "pdftext"));
 }
 const { readDocument, findPdfPages } = await import("../services/context-builder/documents.ts");
 
@@ -51,7 +51,7 @@ test("ipynb: cells instead of raw JSON", async () => {
 
 test("images are OCR'd on-device; PDFs can be searched by page", { skip: !existsSync(realPdftext) }, async () => {
   const txt = join(root, "note.txt");
-  writeFileSync(txt, "OpenAFM receipt 2026\nTotal 42\n");
+  writeFileSync(txt, "OnBud receipt 2026\nTotal 42\n");
   execFileSync("/usr/bin/qlmanage", ["-t", "-s", "800", "-o", root, txt], { stdio: "ignore" });
   const img = await readDocument(root, "note.txt.png", { withMetadata: false });
   assert.equal(img.method, "ocr");

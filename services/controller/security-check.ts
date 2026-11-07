@@ -126,7 +126,7 @@ async function homeFindings(): Promise<Finding[]> {
     [".pypirc", /\bpassword\s*[:=]\s*\S{6,}/, "PyPI password", "PyPI 비밀번호"],
     [".aws/credentials", /aws_secret_access_key\s*=\s*\S{20,}/, "AWS secret key", "AWS 비밀 키"],
     [".docker/config.json", /"auth"\s*:\s*"[A-Za-z0-9+/=]{8,}"/, "Docker registry password (base64, not in Keychain)", "Docker 레지스트리 비밀번호 (Keychain이 아닌 base64)"],
-    ["OpenAFM/config/apfel.token", /\S{16,}/, "OpenAFM local API token", "OpenAFM 로컬 API 토큰"],
+    ["OnBud/config/apfel.token", /\S{16,}/, "OnBud local API token", "OnBud 로컬 API 토큰"],
   ];
   for (const [rel, re, label, labelKo] of files) {
     const p = join(H, rel);
@@ -134,7 +134,7 @@ async function homeFindings(): Promise<Finding[]> {
     let t = ""; try { t = readFileSync(p, "utf8"); } catch { continue; }
     if (!re.test(t)) continue;
     const m = mode(p);
-    const fileSev: Severity = rel.startsWith("OpenAFM") ? (loose(m) ? "medium" : "ok") : rel === ".aws/credentials" || rel === ".npmrc" ? (loose(m) ? "medium" : "low") : "medium";
+    const fileSev: Severity = rel.startsWith("OnBud") ? (loose(m) ? "medium" : "ok") : rel === ".aws/credentials" || rel === ".npmrc" ? (loose(m) ? "medium" : "low") : "medium";
     out.push({ area: "home", severity: fileSev, what: `${label}${loose(m) ? `, readable by other users (mode ${m!.toString(8)})` : ""}`, ko: `${labelKo}${loose(m) ? `, 다른 사용자도 읽을 수 있음 (권한 ${m!.toString(8)})` : ""}`, where: at(p), fix: loose(m) ? "chmod600" : fileSev === "ok" ? undefined : "keychain" });
   }
   for (const hist of [".zsh_history", ".bash_history"]) {

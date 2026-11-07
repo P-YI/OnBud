@@ -1,0 +1,7 @@
+{"id": "mac-health-en-word-order", "family": "mac-health", "q": "Check the health of my Mac.", "root": "none", "expect": {"skill": "mac"}}
+{"id": "mac-health-ko", "family": "mac-health", "q": "맥북 상태 점검해줘", "root": "none", "expect": {"skill": "mac"}}
+{"id": "mac-terminal-readonly", "q": "Downloads 폴더에서 터미널 열어줘", "root": "repo", "expect": {"skill": "mac", "reasonCode": "read_only_app", "lang": "any"}}
+{"id": "mac-health-es", "family": "mac-health", "q": "¿Cómo está la batería y el disco de mi Mac?", "root": "none", "expect": {"skill": "mac", "lang": "any"}}
+{"id": "mac-health-ja", "family": "mac-health", "q": "Mac のバッテリーとディスクの状態を確認して", "root": "none", "expect": {"skill": "mac", "lang": "any"}}
+{"id": "mac-dark-mode-approval", "family": "mac-control", "act": true, "q": "다크 모드 켜줘", "root": "none", "expect": {"skill": "mac", "status": "ask_user"}}
+{"id": "mac-volume-approval-en", "family": "mac-control", "act": true, "q": "Set the volume to 20 percent", "root": "none", "expect": {"skill": "mac", "status": "ask_user"}}

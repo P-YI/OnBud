@@ -112,7 +112,7 @@ export async function buildInventory(root: string, prompt: string, deps: Invento
       realAuthors(info.authors).length ? `authors: ${realAuthors(info.authors).join(", ")}` : ""].filter(Boolean).join("; ");
     const ask = (extra = "") => deps.afm.generate({
       system: `You describe one file for a folder overview. Use only the excerpt and metadata; do not guess beyond them. ` +
-        `Keep names of people, venues, products and titles exactly as written (e.g. "Yein Park", "NeurIPS"); never transliterate them. ` +
+        `Keep names of people, venues, products and titles exactly as written (e.g. "Mina Cho", "NeurIPS"); never transliterate them. ` +
         (korean ? "Write the summary in Korean (한국어로 작성)." : "Write the summary in English.") + extra,
       user: `File: ${f}\nMetadata: ${meta || "none"}\nExcerpt (start of the file):\n${info.text}`,
       schema: DESCRIBE_SCHEMA,

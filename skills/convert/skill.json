@@ -1,0 +1,34 @@
+{
+  "id": "convert",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Converting files the user names into NEW files next to them: image format and size (sips), PDF merge and images to PDF (PDFKit), documents (textutil), zip. Never overwrites or deletes.",
+  "examples": [
+    "Convert photo.heic to jpg",
+    "a.pdf랑 b.pdf 하나로 합쳐줘"
+  ],
+  "reasonCodes": [
+    "local_convert"
+  ],
+  "capabilities": [
+    "read",
+    "write_new"
+  ],
+  "lane": "contained",
+  "egress": "none",
+  "checks": [
+    "results_exist"
+  ],
+  "budget": {
+    "afmCalls": 0,
+    "latencyMs": 60000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "convert": [
+      "Resize banner.png to 800 px wide",
+      "scan1.jpg scan2.jpg를 PDF 하나로 만들어줘",
+      "Turn notes.txt into a Word document"
+    ]
+  }
+}

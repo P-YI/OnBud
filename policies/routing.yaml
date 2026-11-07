@@ -19,6 +19,14 @@ decision:                    # learned scorer next to the rules (routing-v0.5); 
   decima_timeout_ms: 4000
   decima_min_confidence: 0.6 # uncalibrated score, not a probability      # codex agent (GPT-6.1 Sol, ChatGPT subscription)
   decima_code_hard_threshold: 0.2   # routing-v0.7: code tasks scored ≥ 0.2 go to Codex first (dev splits: local 1/9)
+  # routing-v0.11 (2026-11-08): with GitHub Copilot signed in, Copilot writes the code of local jobs (inline
+  # completion) and AFM keeps planning, tests, LaTeX and repair. Who writes first: code-skill.ts firstWriter.
+  #   balanced  (default) function code that tests or examples can check is written by Copilot first; contest-style
+  #             code only when the bundled difficulty classifier calls it easy (skills/code/difficulty.json; Copilot
+  #             solved 80% of easy contest problems and 2-6% of the others on the dev logs), otherwise Codex first.
+  #             The code skill's escalation tries the cheap tier (Terra) and keeps its answer only when a check passes.
+  #   saver     Copilot first for everything checkable (fewer Codex calls, slower, measured less accurate).
+  copilot_mode: balanced
 
 local_task_types:
   - error_summary

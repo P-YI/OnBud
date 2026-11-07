@@ -54,7 +54,7 @@ export function kindOf(path: string): DocKind {
   return "other";
 }
 
-const PDFTEXT = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "bin", "pdftext");
+const PDFTEXT = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "bin", "pdftext");
 // The launcher installs a prebuilt pdftext (Settings > Backend); without it, it is built here from
 // tools/pdftext/main.swift on first use (Command Line Tools come with Homebrew), once per process.
 let pdftextBuild: Promise<boolean> | undefined;

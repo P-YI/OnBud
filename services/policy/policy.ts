@@ -47,7 +47,7 @@ export interface Policy {
   rules: RulesConfig;
   afm: { maxRounds: number; maxToolCalls: number; timeoutMs: number; maxInputTokens: number };
   afmSystem: string;
-  decision: { decima: { mode: "off" | "shadow" | "advise"; url: string; model: string; digest?: string; timeoutMs: number; minConfidence: number; codeHardThreshold: number } };
+  decision: { decima: { mode: "off" | "shadow" | "advise"; url: string; model: string; digest?: string; timeoutMs: number; minConfidence: number; codeHardThreshold: number }; copilotMode: "balanced" | "saver" };
   skills: Partial<Record<TaskType, { name: string; text: string }>>;
 }
 
@@ -95,6 +95,7 @@ export function loadPolicy(dir = new URL("../../policies/", import.meta.url).pat
         minConfidence: num(y.decision?.decima_min_confidence, 0.6),
         codeHardThreshold: num(y.decision?.decima_code_hard_threshold, 0.5),
       },
+      copilotMode: y.decision?.copilot_mode === "saver" ? "saver" : "balanced",
     },
     skills,
   };

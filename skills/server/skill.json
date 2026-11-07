@@ -1,0 +1,41 @@
+{
+  "id": "server",
+  "version": "0.1.0",
+  "contract": "1.2",
+  "description": "A remote machine (GPU server, Slurm cluster) through the user's own SSH: upload the project (secrets and big files left out) and run a command on approval, read job state and logs, and open the server in a terminal IDE on the Mac (Fresh, or TTT/a shell/tmux on the server). Code is still written on the Mac by the code skill.",
+  "examples": [
+    "gpu1에서 train.py 돌려줘",
+    "gpu1 학습 어디까지 됐어?",
+    "Open gpu1 in fresh"
+  ],
+  "reasonCodes": [
+    "local_server"
+  ],
+  "capabilities": [
+    "read",
+    "propose",
+    "run_approved",
+    "remote"
+  ],
+  "lane": "contained",
+  "egress": "remote",
+  "checks": [
+    "reply_language",
+    "app_opened"
+  ],
+  "budget": {
+    "afmCalls": 0,
+    "latencyMs": 30000,
+    "frontierCalls": 0
+  },
+  "plugin": "server",
+  "entries": {
+    "server": [
+      "GPU 서버에서 이 코드 실행해줘",
+      "gpu1 서버 학습 진행 상황 알려줘",
+      "Run train.py on the cluster with sbatch",
+      "Open the GPU server in fresh",
+      "서버 ttt로 보여줘"
+    ]
+  }
+}

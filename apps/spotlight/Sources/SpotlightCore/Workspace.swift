@@ -2,7 +2,7 @@
 // the controller's local jobs and background sessions, folder-aware quick actions, and step labels.
 import Foundation
 
-// MARK: - History (~/Library/Application Support/OpenAFM/history.json, mode 600)
+// MARK: - History (~/Library/Application Support/OnBud/history.json, mode 600)
 
 public struct SavedChat: Codable, Sendable, Identifiable, Equatable {
     public var id: UUID
@@ -20,7 +20,7 @@ public struct HistoryStore: Sendable {
     public static let limit = 50
     public init(file: URL? = nil) {
         self.file = file ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/OpenAFM/history.json")
+            .appendingPathComponent("Library/Application Support/OnBud/history.json")
     }
     public func load() -> [SavedChat] {
         guard let data = try? Data(contentsOf: file) else { return [] }
@@ -111,7 +111,7 @@ public struct JobSummary: Sendable, Identifiable, Equatable {
 }
 
 public enum Activity {
-    public static func jobs(paths: OpenAFMPaths = OpenAFMPaths(), limit: Int = 20) -> [JobSummary] {
+    public static func jobs(paths: OnBudPaths = OnBudPaths(), limit: Int = 20) -> [JobSummary] {
         let dir = paths.home.appendingPathComponent("runtime/jobs")
         let ids = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         let jobs: [JobSummary] = ids.compactMap { id in
@@ -125,12 +125,12 @@ public enum Activity {
         return Array(jobs.sorted { $0.createdAt > $1.createdAt }.prefix(limit))
     }
 
-    /** Background sessions the controller started (tmux -L openafm): names only. */
+    /** Background sessions the controller started (tmux -L onbud): names only. */
     public static func sessions() -> [String] {
         let tmux = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"].first { FileManager.default.isExecutableFile(atPath: $0) }
         guard let tmux else { return [] }
         let p = Process(); p.executableURL = URL(fileURLWithPath: tmux)
-        p.arguments = ["-L", "openafm", "list-sessions", "-F", "#{session_name}"]
+        p.arguments = ["-L", "onbud", "list-sessions", "-F", "#{session_name}"]
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { return [] }
         let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
@@ -167,6 +167,7 @@ public enum QuickActions {
             out.append(QuickAction(title: "Recent commits", prompt: "What are the 5 most recent commit messages?", symbol: "clock.arrow.circlepath"))
             out.append(QuickAction(title: "Local jobs", prompt: "local jobs", symbol: "list.bullet.rectangle"))
         }
+        out.append(QuickAction(title: "Terminal here", prompt: "open a terminal here", symbol: "terminal"))
         out.append(QuickAction(title: "Commands", prompt: "show commands", symbol: "questionmark.circle"))
         return out
     }
@@ -201,6 +202,7 @@ public enum StepLabel {
         case "episode", "lesson": return "Recalling earlier notes…"
         default:
             if kind.hasPrefix("skill_") { return skill(String(kind.dropFirst(6))) }
+            if kind.hasPrefix("copilot") { return "Copilot is writing the code…" }
             // Unknown (newer controller): its name in words, never the raw identifier.
             let words = kind.replacingOccurrences(of: "_", with: " ")
             return words.prefix(1).uppercased() + words.dropFirst() + "…"
@@ -223,7 +225,50 @@ public enum StepLabel {
         case "slides_outline": return "Reading the slides…"
         case "git_overview": return "Checking the git repository…"
         case "github_status": return "Checking GitHub…"
+        case "open_app": return "Opening it in your app…"
+        case "launch_app": return "Finding the app…"
+        case "security_check": return "Running the security check…"
+        case "mac_health": return "Checking this Mac…"
         default: return "Using a local skill…"
         }
+    }
+}
+
+// MARK: - The user's own apps (~/OnBud/config/apps.json, read by the controller's open_app skill)
+
+/** Which terminal, editor and browser OnBud opens things in; nil = the macOS default. Other keys are kept. */
+public struct AppChoices: Equatable, Sendable {
+    public var terminal: String?, editor: String?, browser: String?
+    public init(terminal: String? = nil, editor: String? = nil, browser: String? = nil) {
+        self.terminal = terminal; self.editor = editor; self.browser = browser
+    }
+    public static func file(_ paths: OnBudPaths = OnBudPaths()) -> URL { paths.home.appendingPathComponent("config/apps.json") }
+
+    public static func load(from file: URL = file()) -> AppChoices {
+        guard let data = try? Data(contentsOf: file), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return AppChoices() }
+        return AppChoices(terminal: o["terminal"] as? String, editor: o["editor"] as? String, browser: o["browser"] as? String)
+    }
+    public func save(to file: URL = file()) throws {
+        var o = ((try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:]
+        for (k, v) in [("terminal", terminal), ("editor", editor), ("browser", browser)] { o[k] = v }
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys]).write(to: file, options: .atomic)
+    }
+    /** Installed apps of a kind, by name (what apps.json stores; the controller resolves names itself). */
+    public static func installed(_ kind: String) -> [String] {
+        let names: [String] = switch kind {
+        case "terminal": ["Terminal", "iTerm", "Warp", "Ghostty", "kitty", "Alacritty"]
+        case "editor": ["Visual Studio Code", "Cursor", "Zed", "BBEdit", "Sublime Text", "TextEdit", "Xcode"]
+        default: ["Safari", "Google Chrome", "Arc", "Firefox", "Microsoft Edge", "Brave Browser"]
+        }
+        let dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities",
+                    NSHomeDirectory() + "/Applications", "/System/Volumes/Preboot/Cryptexes/App/System/Applications"]
+        return names.filter { n in dirs.contains { FileManager.default.fileExists(atPath: "\($0)/\(n).app") } || (n == "iTerm" && dirs.contains { FileManager.default.fileExists(atPath: "\($0)/iTerm2.app") }) }
+    }
+    /** The app bundle for a stored name, if installed. */
+    public static func appURL(_ name: String) -> URL? {
+        let dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities", NSHomeDirectory() + "/Applications"]
+        for d in dirs { for n in [name, name == "iTerm" ? "iTerm2" : name] where FileManager.default.fileExists(atPath: "\(d)/\(n).app") { return URL(fileURLWithPath: "\(d)/\(n).app") } }
+        return nil
     }
 }

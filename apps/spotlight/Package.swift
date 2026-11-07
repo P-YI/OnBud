@@ -1,5 +1,5 @@
 // swift-tools-version:6.0
-// AFM Spotlight: a Spotlight-style launcher for the local OpenAFM controller.
+// AFM Spotlight: a Spotlight-style launcher for the local OnBud controller.
 // Builds with the Command Line Tools only (no Xcode project): `make app`.
 import PackageDescription
 

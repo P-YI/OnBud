@@ -1,4 +1,4 @@
-// MCP server (stdio, JSON-RPC 2.0) that lends the local OpenAFM tools to a frontier agent (Codex in
+// MCP server (stdio, JSON-RPC 2.0) that lends the local OnBud tools to a frontier agent (Codex in
 // OpenCode): AFM works as the intern on local material.
 //   read_document    PDF/Word/slides/sheets/hwpx/epub/images → text (OCR on-device), optional page search
 //   find_files       files/folders by name across the Mac (Spotlight + hidden folders), private paths filtered
@@ -8,8 +8,13 @@
 //   latex_check      compile with latexmk (offline) + citation/reference checks
 //   latex_table      CSV/TSV → booktabs table
 //   latex_polish     masked prose rewrite of given .tex lines; returns the replacement, never writes
+//   afm_task         hand a small, self-contained local step to the whole local agent (controller: skills, AFM,
+//                    Decima advice when it is on): an answer or a proposal comes back; it never runs commands,
+//                    edits files, opens apps, starts local jobs or calls a frontier model (no loop back to Codex)
+//   afm_code         code written by GitHub Copilot's inline completion (unlimited on every plan) for one file —
+//                    a new file or one named function — returned as a diff for Codex to review and apply
 // No tool writes files: Codex applies changes with its own edit tool, under OpenCode's approvals.
-// Paths: relative to the project (OPENAFM_MCP_ROOT or the working directory) or absolute under $HOME;
+// Paths: relative to the project (ONBUD_MCP_ROOT or the working directory) or absolute under $HOME;
 // the security gate's secret paths are refused. Everything runs on this Mac.
 
 import { createInterface } from "node:readline";
@@ -22,17 +27,22 @@ import { findByName, renderFound, type FindKind } from "../services/context-buil
 import { checkReferences, compileLatex, csvToLatexTable, findMainTex, hasTeX, maskLatex, renderLatexReport, unmaskLatex } from "../services/context-builder/latex.ts";
 import { gatePath, redact } from "../services/security/gate.ts";
 import { openDb } from "../services/telemetry/db.ts";
+import { Controller } from "../services/controller/controller.ts";
+import { MemoryStore } from "../services/memory/memory.ts";
+import { copilotProposal } from "../services/controller/jobs.ts";
+import { copilotFiller } from "../services/frontier/copilot-ls.ts";
 
 const VERSION = "0.1.0";
-// Project folder: MCP "roots" from the client when it offers them, else OPENAFM_MCP_ROOT or the working
+// Project folder: MCP "roots" from the client when it offers them, else ONBUD_MCP_ROOT or the working
 // directory. The OpenCode service starts MCP servers in the home folder, which is never used as a project.
-let ROOT = resolve(process.env.OPENAFM_MCP_ROOT ?? process.cwd());
+let ROOT = resolve(process.env.ONBUD_MCP_ROOT ?? process.cwd());
 const projectRoot = () => (ROOT === homedir() || ROOT === "/" ? undefined : ROOT);
-const LOG = resolve(process.env.OPENAFM_HOME ?? resolve(homedir(), "OpenAFM"), "runtime", "logs", "mcp.jsonl");
+const LOG = resolve(process.env.ONBUD_HOME ?? resolve(homedir(), "OnBud"), "runtime", "logs", "mcp.jsonl");
 const log = (e: Record<string, unknown>) => { try { appendFileSync(LOG, JSON.stringify({ ts: new Date().toISOString(), ...e }) + "\n"); } catch { /* best effort */ } };
 let afm: ApfelProvider | undefined;
 const model = () => (afm ??= new ApfelProvider({ defaultTimeoutMs: 60_000 }));
 let db: ReturnType<typeof openDb> | undefined;
+let ctl: Controller | undefined;
 const cache = () => { try { return (db ??= openDb()); } catch { return undefined; } };
 
 /** Resolve a user/agent-supplied path to (root, rel) that the gate accepts, or throw. */
@@ -64,6 +74,14 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { path: S("CSV or TSV file"), caption: S("Optional caption"), label: S("Optional \\label key") }, required: ["path"] } },
   { name: "latex_polish", description: "Rewrite the prose of given lines of a .tex file with the on-device model while keeping every LaTeX command, citation and math exactly (they are masked). Returns the replacement text; it does not edit the file.",
     inputSchema: { type: "object", properties: { path: S(".tex file"), from_line: { type: "integer" }, to_line: { type: "integer" }, request: S("How to rewrite, e.g. more concise and academic") }, required: ["path", "from_line", "to_line", "request"] } },
+  { name: "afm_task", description: "Hand a small, self-contained local step to the on-device OnBud agent (free, private; Decima advises its routing when enabled). Good for: questions about local documents, spreadsheets (every row, group headings) and slides; git state, worktrees and change summaries; commit messages and release notes; the cause in an error log; action-item tables; secret/security scans; Mac status; counting or finding files. Returns an answer, or a proposal (command, edit) that you apply yourself — it never runs commands, edits files, opens apps or starts long jobs. If it answers that the step is too hard, do it yourself.",
+    inputSchema: { type: "object", properties: { request: S("The step, in plain words, as you would ask a colleague (Korean or English); name files relative to the project"),
+      folder: S("Absolute path of the project folder you are working in (pass it: OpenCode 2 shares one tool server across sessions, so the server may not know your folder)") }, required: ["request", "folder"] } },
+  { name: "afm_code", description: "Have GitHub Copilot (inline completion: no premium requests, no Codex tokens) write the code for ONE file: a new file, or the body of one function named in `request` in an existing file. Returns a unified diff plus a syntax check; nothing is written. Review the diff and apply it with your own edit tool if it is right (it can be wrong: check it, run the tests). Good for routine implementations whose behaviour you can state in a sentence or two; keep design and tricky logic yourself.",
+    inputSchema: { type: "object", properties: { folder: S("Absolute path of the project folder"), path: S("File to write, relative to the folder"),
+      request: S("What the code must do, naming the function to (re)write, e.g. 'implement parse_date(s): ISO date or dd.mm.yyyy → date; raise ValueError otherwise'") }, required: ["folder", "path", "request"] } },
+  { name: "server_jobs", description: "Read the jobs OnBud started on the user's remote servers (GPU servers, Slurm clusters; Server skill): with `job` (or `latest: true`) its state (running, done + exit code, Slurm state) and the log's last lines, read over the user's SSH; without, the list. It never uploads, starts or stops anything: the user asks the afm agent for that, and approves it.",
+    inputSchema: { type: "object", properties: { job: S("Job id (e.g. j84c8joo4); omit to list jobs"), latest: { type: "boolean", description: "The most recent job" }, lines: { type: "number", description: "Log lines to return (default 60, max 400)" } } } },
 ];
 
 const textSchema = (key: string, desc: string) => ({ type: "object" as const, properties: { [key]: { type: "string" as const, description: desc } }, required: [key], additionalProperties: false });
@@ -147,6 +165,53 @@ async function call(name: string, a: any): Promise<string> {
       if (!restored) throw new Error("the model dropped LaTeX markup; nothing to apply — try a smaller range");
       return `Replacement for ${rel} lines ${from}-${to} (markup unchanged; apply with your edit tool):\n\n${restored}`;
     }
+    case "afm_task": {
+      // The whole local agent, read-only and without a frontier (no loop back to the caller).
+      // context memory read-only (the controller never writes it for a read-only task)
+      ctl ??= new Controller({ afm: model(), db: cache(), memory: cache() ? new MemoryStore(cache()!) : undefined });
+      const t0 = Date.now();
+      // The caller's folder (OpenCode 2 starts one MCP server per service, rooted at "/" or home, not per session);
+      // only a real folder inside the home folder, never the home folder itself.
+      let root = projectRoot();
+      if (a.folder) {
+        const f = resolve(String(a.folder).replace(/^~(?=\/|$)/, homedir()));
+        let dir = false; try { dir = statSync(f).isDirectory(); } catch { /* missing */ }
+        if (!dir || !f.startsWith(homedir() + "/")) throw new Error("folder must be an existing folder inside your home folder");
+        root = f;
+      }
+      const o = await ctl.handle({ prompt: String(a.request ?? ""), root, frontEnd: "mcp", allowFrontier: false, readOnly: true });
+      const meta = `[OnBud · ${o.reasonCode || o.status} · ${((Date.now() - t0) / 1000).toFixed(1)}s · on-device]`;
+      if (o.status === "escalation_required" || o.status === "failed")
+        return `${meta}\nThe local agent could not do this step (${o.reasonCode}). Do it yourself.${o.capsule ? `\n\nWhat it gathered:\n${o.capsule.slice(0, 3000)}` : ""}`;
+      const proposal = o.pendingCommand ? `\n\nProposed command (not run; run it with your own tool if appropriate):\n${o.pendingCommand}`
+        : o.pendingEdit ? "\n\nThis is a proposed edit (not applied); apply it with your own edit tool if appropriate." : "";
+      return `${meta}\n${o.answer ?? ""}${proposal}`;
+    }
+    case "afm_code": {
+      const f = resolve(String(a.folder ?? "").replace(/^~(?=\/|$)/, homedir()));
+      let dir = false; try { dir = statSync(f).isDirectory(); } catch { /* missing */ }
+      if (!dir || !f.startsWith(homedir() + "/")) throw new Error("folder must be an existing folder inside your home folder");
+      const rel = relative(f, resolve(f, String(a.path ?? "")));
+      if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("path must be inside the folder");
+      const g = gatePath(rel, f, "write");
+      if (g.verdict === "deny") throw new Error(`blocked by the security gate (${g.reasons.join(", ")})`);
+      const ls = await copilotFiller(f);
+      if (!ls) return "GitHub Copilot is not available (not installed, signed out, or turned off). Write the code yourself.";
+      const t0 = Date.now();
+      const p = await copilotProposal(ls, f, rel, String(a.request ?? ""));
+      const meta = `[OnBud · Copilot inline completion · ${((Date.now() - t0) / 1000).toFixed(1)}s]`;
+      if (!p || !p.diff.trim()) return `${meta}\nCopilot returned no code for this. Write it yourself.`;
+      return `${meta} ${p.what}; syntax: ${p.syntax ? `ERROR ${p.syntax.slice(0, 400)}` : "ok"}\nProposed diff (not applied — review, apply with your edit tool, then run the tests):\n\n${redact(p.diff).text.slice(0, 12000)}`;
+    }
+    case "server_jobs": {
+      const R = await import("../services/server/remote.ts");
+      const job = a.job ? R.findJob(String(a.job)) : a.latest ? R.findJob() : undefined;
+      if (!a.job && !a.latest) return R.listJobs().slice(-20).map((j) => `${j.id}  ${j.host}  ${j.started.slice(0, 16)}  ${j.kind}  ${j.command}`).join("\n") || "No server jobs yet.";
+      if (!job) throw new Error(`no job ${a.job ?? ""}`.trim());
+      const r = await R.status(job, Math.min(400, Number(a.lines) || 60));
+      if (!r.ok) return `[OnBud · ${job.host}] ${r.error}`;
+      return `[OnBud · ${job.host} · ${job.id}] ${r.status.state}${r.status.exitCode !== undefined ? ` (exit ${r.status.exitCode})` : ""}\n$ ${job.command}\nfolder ${job.dir}, log ${job.log}\n\n${redact(r.status.tail).text.slice(-12000)}`;
+    }
     default:
       throw new Error(`unknown tool ${name}`);
   }
@@ -155,7 +220,7 @@ async function call(name: string, a: any): Promise<string> {
 // ---------------------------------------------------------------- JSON-RPC over stdio
 const send = (msg: unknown) => process.stdout.write(JSON.stringify(msg) + "\n");
 let clientRoots = false;
-const ROOTS_ID = "openafm-roots";
+const ROOTS_ID = "onbud-roots";
 /** Ask the client for its workspace roots (server → client request); the reply arrives as a response line. */
 function askRoots() { send({ jsonrpc: "2.0", id: ROOTS_ID, method: "roots/list" }); }
 
@@ -178,7 +243,7 @@ rl.on("line", async (line) => {
         clientRoots = !!m.params?.capabilities?.roots;
         log({ event: "initialize", client: m.params?.clientInfo?.name, roots: clientRoots, cwd: process.cwd() });
         return reply({ protocolVersion: m.params?.protocolVersion ?? "2025-06-18", capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "openafm", version: VERSION }, instructions: "Local, private tools backed by the on-device Apple model. Prefer afm_summarize/read_document with query for long local documents to save tokens; no tool writes files." });
+          serverInfo: { name: "onbud", version: VERSION }, instructions: "Local, private tools backed by the on-device Apple model. Prefer afm_summarize/read_document with query for long local documents, and afm_task for small routine local steps (git state, change summaries, spreadsheet lookups, secret scans, file counts), to save tokens; keep reasoning-heavy work yourself. For routine code in one file (a new helper, a function body whose behaviour you can state briefly) call afm_code first: GitHub Copilot writes it for free and you review the diff, apply it and run the tests; write it yourself when the diff is wrong or the logic is subtle. server_jobs reads the state and log of jobs OnBud started on the user's servers. No tool writes files." });
       case "ping": return reply({});
       case "notifications/initialized":
       case "notifications/roots/list_changed":

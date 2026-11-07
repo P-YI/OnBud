@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { redact, type GateResult } from "../../services/security/gate.ts";
 import { evaluateTool } from "../../services/security/tool-gate.ts";
 
-const LOG_DIR = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "logs");
+const LOG_DIR = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "logs");
 function log(entry: Record<string, unknown>) {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
@@ -40,7 +40,7 @@ function redactParts(parts: any[] | undefined): number {
 }
 
 const SecurityGateV2 = {
-  id: "openafm.security-gate",
+  id: "onbud.security-gate",
   setup: async (ctx: any) => {
     const root: string = ctx?.location?.directory ?? process.cwd();
     log({ hook: "load", root_set: !!ctx?.location?.directory });

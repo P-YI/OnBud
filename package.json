@@ -4,8 +4,9 @@
   "type": "module",
   "engines": { "node": ">=22.6" },
   "scripts": {
-    "test": "node --experimental-strip-types --experimental-sqlite --no-warnings --test 'tests/**/*.test.ts'",
+    "test": "node --experimental-strip-types --experimental-sqlite --no-warnings --test --test-timeout=60000 'tests/**/*.test.ts'",
     "doctor": "scripts/doctor.sh",
-    "smoke:apfel": "scripts/apfel-smoke.sh"
+    "smoke:apfel": "scripts/apfel-smoke.sh",
+    "skills:eval": "node --experimental-strip-types --experimental-sqlite --no-warnings tools/skill-eval.ts"
   }
 }

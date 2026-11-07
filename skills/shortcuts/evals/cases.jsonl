@@ -1,0 +1,2 @@
+{"id": "shortcuts-list-ko", "family": "shortcuts", "act": true, "q": "내 단축어 목록 보여줘", "root": "none", "expect": {"skill": "shortcuts"}}
+{"id": "shortcuts-create-refused", "family": "shortcuts", "act": true, "q": "Create a new shortcut that emails my boss", "root": "none", "expect": {"skill": "shortcuts", "answer": "Shortcuts app|does not write"}}

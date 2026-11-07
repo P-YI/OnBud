@@ -9,13 +9,14 @@
 //              the newest 1000 rows are deleted; then the WAL is checkpointed.
 // readLog() reads a log together with its rotated copies, for tools that need the history (threshold calibration,
 // the report).
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { gunzipSync, gzipSync } from "node:zlib";
 
-const RUNTIME = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime");
+const RUNTIME = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime");
 export const LOG_DIR = join(RUNTIME, "logs");
 const STATE = join(RUNTIME, "state", "housekeeping.json");
 export const LIMITS = { logBytes: 10 * 1024 * 1024, keep: 3, cacheDays: 90, cacheRows: 1000, everyMs: 24 * 3600_000 };
@@ -77,7 +78,8 @@ export function housekeeping(db?: DatabaseSync, force = false): { ran: boolean; 
   } catch { return { ran: false, rotated: [], pruned: 0 }; }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isMain = (() => { try { return import.meta.url === pathToFileURL(realpathSync(process.argv[1] ?? "")).href; } catch { return false; } })();
+if (isMain) {
   const { openDb } = await import("../telemetry/db.ts");
   console.log(housekeeping(openDb(), process.argv.includes("--now")));
 }

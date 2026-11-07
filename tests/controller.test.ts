@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.OPENAFM_HOME = mkdtempSync(join(tmpdir(), "openafm-home-"));   // keep test logs out of the real runtime
+process.env.ONBUD_HOME = mkdtempSync(join(tmpdir(), "onbud-home-"));   // keep test logs out of the real runtime
 const { Controller, identifiers, mentionedFiles } = await import("../services/controller/controller.ts");
 const { FakeAFM, isTriage, isPick, isArgs, isAnswer, makeRepo } = await import("./helpers.ts");
 
@@ -186,11 +186,18 @@ test("Korean fallback translation is dropped when it would transliterate names",
   const afm = new FakeAFM((r) => {
     if (isTriage(r)) return triage("other");
     if (isPick(r)) return { json: { action: "respond_directly" } };
-    if (isAnswer(r)) return { json: { answer: "Finale Doshi-Velez signed the letter (README.md).", needs_escalation: false, assumptions: [] } };
-    if (r.schema?.properties?.korean) return { json: { korean: "파이널 도시-베젤이 편지에 서명했어요 (README.md)." } };
+    if (isAnswer(r)) return { json: { answer: "Jordan Lee-Moreno signed the letter (README.md).", needs_escalation: false, assumptions: [] } };
+    if (r.schema?.properties?.korean) return { json: { korean: "조던 리-모레노이 편지에 서명했어요 (README.md)." } };
     return { failure: "empty" };
   });
-  const out = await new Controller({ afm }).handle({ prompt: "README.md 편지 보낸 사람이 누구야?", root });
-  assert.match(out.answer!, /Finale Doshi-Velez/);
-  assert.ok(out.steps.some((s) => /kept original: names lost/.test(s.detail)));
+  // the older in-route translation (reply-language contract off)
+  process.env.ONBUD_LANG_CONTRACT = "off";
+  try {
+    const out = await new Controller({ afm }).handle({ prompt: "README.md 편지 보낸 사람이 누구야?", root });
+    assert.match(out.answer!, /Jordan Lee-Moreno/);
+    assert.ok(out.steps.some((s) => /kept original: names lost/.test(s.detail)));
+  } finally { delete process.env.ONBUD_LANG_CONTRACT; }
+  // the contract (default): names are masked, so they survive whatever the translation does
+  const out2 = await new Controller({ afm }).handle({ prompt: "README.md 편지 보낸 사람이 누구야?", root });
+  assert.match(out2.answer!, /Jordan Lee-Moreno/);
 });

@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.OPENAFM_HOME = mkdtempSync(join(tmpdir(), "openafm-home-"));
+process.env.ONBUD_HOME = mkdtempSync(join(tmpdir(), "onbud-home-"));
 const { classifyCommand, execCommand } = await import("../services/context-builder/terminal.ts");
 const { Controller } = await import("../services/controller/controller.ts");
 const { FakeAFM, isTriage, isPick, isArgs, isAnswer, makeRepo } = await import("./helpers.ts");

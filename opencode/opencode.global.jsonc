@@ -1,9 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  // OpenAFM hybrid agent — global so AFM is available in every project.
-  // Source of truth for prompts/policies: ~/OpenAFM/adaptive-coding-agent (git). Backup of the
-  // previous (empty) file: ~/OpenAFM/runtime/reports/opencode.jsonc.global-backup-*
-  "enabled_providers": ["afm", "afm-agent", "openai", "opencode"],
+  // OnBud hybrid agent — global so AFM is available in every project.
+  // Source of truth for prompts/policies: ~/OnBud/adaptive-coding-agent (git). Backup of the
+  // previous (empty) file: ~/OnBud/runtime/reports/opencode.jsonc.global-backup-*
+  // Providers shown in the model picker. A provider signed in with `opencode auth login` (or OAuth in the
+  // desktop app) stays hidden until it is listed here.
+  "enabled_providers": ["afm", "afm-agent", "openai", "github-copilot", "opencode"],
   "default_agent": "afm",
   // The v2 desktop app starts new sessions with the top-level model rather than default_agent,
   // so the default model is the AFM controller too. codex keeps GPT-6.1 Sol via its own agent model.
@@ -15,7 +17,7 @@
       "name": "Apple Foundation Model (on-device)",
       "options": {
         "baseURL": "http://127.0.0.1:11434/v1",
-        "apiKey": "{file:~/OpenAFM/config/apfel.token}"
+        "apiKey": "{file:~/OnBud/config/apfel.token}"
       },
       "models": {
         "apple-foundationmodel": {
@@ -27,10 +29,10 @@
     },
     "afm-agent": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "AFM agent (OpenAFM controller)",
+      "name": "AFM agent (OnBud controller)",
       "options": {
         "baseURL": "http://127.0.0.1:11435/v1",
-        "apiKey": "{file:~/OpenAFM/config/apfel.token}"
+        "apiKey": "{file:~/OnBud/config/apfel.token}"
       },
       "models": {
         "afm-controller": {
@@ -82,9 +84,9 @@
   // Local AFM tools for frontier agents (codex): document reading/OCR, finder, on-device summaries and
   // drafts, offline LaTeX checks. Read-only; the afm/afm-local agents have their tools disabled anyway.
   "mcp": {
-    "openafm": {
+    "onbud": {
       "type": "local",
-      "command": ["/bin/bash", "{env:HOME}/OpenAFM/adaptive-coding-agent/scripts/node-run.sh", "{env:HOME}/OpenAFM/adaptive-coding-agent/bin/afm-mcp-server.ts"],
+      "command": ["/bin/bash", "{env:HOME}/OnBud/adaptive-coding-agent/scripts/node-run.sh", "{env:HOME}/OnBud/adaptive-coding-agent/bin/afm-mcp-server.ts"],
       "enabled": true,
       "timeout": 120000
     }
@@ -103,6 +105,13 @@
       "model": "openai/gpt-6.1-sol",
       "variant": "medium"
     },
+    // GitHub Copilot: no agent yet. Copilot Free/Student plans are Auto-only: every model reports
+    // model_picker_enabled=false, so OpenCode 2.2.5 lists none (shared service) or refuses them ("not available for
+    // integrator opencode"). An agent on github-copilot/auto silently fell back to the default model (AFM), so it
+    // is left out until OpenCode ships auto (PR #55960; also #57956, issue #34644). Then add:
+    //   "copilot": { "description": "GitHub Copilot (Auto)", "mode": "primary", "model": "github-copilot/auto" },
+    // Until then the credit-free route is VS Code: ask the afm agent "copilot에게 보내줘" (code chat, Auto), or use
+    // inline and next-edit suggestions in the editor.
     "codex-handoff": {
       "description": "Read-only Codex used when you approve an AFM hand-off. Cannot edit files or run arbitrary commands.",
       "mode": "primary",
@@ -127,11 +136,34 @@
       "prompt": "You write correct, complete code. Reply with only the code block asked for.",
       "tools": { "*": false }
     },
+    // The code skill's cheap tier (default GPT-6.1 Terra, listed at about half Sol's price; pick another model in
+    // Spotlight > Backend > Routing): its answer is kept only when a check passes (the examples, or agreement with
+    // Copilot's code); otherwise codex-solve answers. Named for the role so a model change needs no rename.
+    "codex-solve-cheap": {
+      "description": "Code-only, cheaper model (checked escalations).",
+      "mode": "primary",
+      "hidden": true,
+      "model": "openai/gpt-6.1-terra",
+      "variant": "medium",
+      "prompt": "You write correct, complete code. Reply with only the code block asked for.",
+      "tools": { "*": false }
+    },
+    // Experiment (code benchmark only): Codex leads and has Copilot write routine functions through afm_code, to
+    // see whether delegating the code it would print saves output tokens. Not used by OnBud itself.
+    "codex-lead": {
+      "description": "Code-only Codex that delegates routine functions to Copilot (afm_code); benchmark experiment.",
+      "mode": "primary",
+      "hidden": true,
+      "model": "openai/gpt-6.1-sol",
+      "variant": "medium",
+      "prompt": "You write correct, complete code. For routine functions whose behaviour you can state in a sentence, call the onbud_afm_code tool (folder and path are given in the task) and use its proposed code if it is right; write tricky logic yourself. Reply with only the final complete code block.",
+      "tools": { "*": false, "onbud_afm_code": true }
+    },
     "afm-local": {
       "description": "Short, bounded tasks on the on-device Apple model. No tools.",
       "mode": "primary",
       "model": "afm/apple-foundationmodel",
-      "prompt": "{file:~/OpenAFM/adaptive-coding-agent/policies/AFM.md}",
+      "prompt": "{file:~/OnBud/adaptive-coding-agent/policies/AFM.md}",
       "temperature": 0,
       "tools": { "*": false }
     },

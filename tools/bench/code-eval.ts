@@ -7,15 +7,16 @@
 // usage: node --experimental-strip-types --experimental-sqlite tools/bench/code-eval.ts --bench humaneval --mode raw --n 20 [--offset 0]
 
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { runPython, type Run } from "../../services/controller/sandbox.ts";
 import { ApfelProvider } from "../../services/afm-adapter/apfel.ts";
 import { DecimaClient, codeDifficulty } from "../../services/laya-router/decima.ts";
-import { algorithmic, solveAdaptive, solveLocal, type CodeTask } from "../../services/controller/codegen.ts";
+import { algorithmic, solveLocal, type CodeTask } from "../../services/controller/codegen.ts";
 
 const args = process.argv.slice(2);
-process.env.OPENAFM_BENCH = "1";   // marks controller log records from this run as benchmark
+process.env.ONBUD_BENCH = "1";   // marks controller log records from this run as benchmark
 const opt = (k: string, d: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const BENCH = opt("--bench", "humaneval"), MODE = opt("--mode", "raw"), N = Number(opt("--n", "1000")), OFFSET = Number(opt("--offset", "0"));
 const IDS = opt("--ids", "");                       // subset file (tools/bench/subsets/*.json) — same ids for every setting
@@ -24,36 +25,25 @@ const TAG = opt("--tag", "");
 const UNVERIFIABLE = opt("--unverifiable", "decima");   // decima | escalate
 const TEMP = Number(opt("--temp", "0"));                // AFM sampling temperature for raw/v1 generation (temperature check)
 // OpenCode agent for Codex calls: codex-handoff (read-only tools, as in v1–v3) or codex-solve (no tools, short prompt).
-const FRONTIER_AGENT = opt("--frontier-agent", TAG.startsWith("v4") ? "codex-solve" : "codex-handoff");
+// The lean agent for every setting (2026-11-07): the default used to depend on the tag ("v4…"), and runs tagged
+// otherwise (v0.2.0's "v5") sent part of their calls through codex-handoff, inflating their cost.
+const FRONTIER_AGENT = opt("--frontier-agent", "codex-solve");
+// the code skill's cheap tier (checked before it is kept; the strong tier is FRONTIER_AGENT)
+const CHEAP_AGENT = opt("--cheap-agent", "codex-solve-cheap");
 // v4 S1: the first local attempt skips the approach/edge-case fields (dev: same 28/30, escalations 16.2 → 11.7 s);
 // --plan keeps them (the "v4dev" run), --no-plan was the flag of the "v4npdev" run.
 const NO_PLAN = TAG.startsWith("v4") && opt("--mode", "raw") === "s1" ? !args.includes("--plan") : args.includes("--no-plan");
-let callTokens: { input: number; output: number; reasoning: number; cacheRead: number }[] = [];   // Codex usage, per problem
-const DIR = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "bench", "code");
+let callTokens: { input: number; output: number; reasoning: number; cacheRead: number; agent?: string }[] = [];   // Codex usage, per problem
+const DIR = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "bench", "code");
 const afm = new ApfelProvider({ defaultTimeoutMs: 90_000 });
 const decima = new DecimaClient({ mode: "advise" });
 
 interface Problem { task?: () => CodeTask; key?: string; id: string; prompt: string; check: (code: string) => Promise<Run>; examples: (code: string) => Promise<Run> | undefined; entry?: string; lang: "py" }
-interface Run { ok: boolean; out: string }
 
-// ---------------------------------------------------------------- sandboxed execution
-// Python 3.10+ as in the official harnesses (macOS /usr/bin/python3 is 3.9); the uv-managed 3.13 if present.
-const PY = (() => { try { const base = join(homedir(), ".local/share/uv/python"); const d = readdirSync(base).filter((x) => /^cpython-3\.1\d/.test(x)).sort().pop(); return d && existsSync(join(base, d, "bin/python3")) ? join(base, d, "bin/python3") : "/usr/bin/python3"; } catch { return "/usr/bin/python3"; } })();
+// ---------------------------------------------------------------- sandboxed execution (services/controller/sandbox.ts)
+const sandboxRun = runPython;
 // LiveCodeBench's harness runs every solution after these imports.
 const LCB_PREFIX = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string, re, datetime, collections, heapq, bisect, copy, math, random, statistics, itertools, functools, operator, io, sys, json\nsys.setrecursionlimit(50000)\n";
-function sandboxRun(program: string, stdin = "", timeoutMs = 10_000): Promise<Run> {
-  const dir = mkdtempSync(join(tmpdir(), "afm-eval-"));
-  writeFileSync(join(dir, "prog.py"), program);
-  // Network rules split by direction: a (local ip "localhost:*") rule on network* also matched outbound connections
-  // to any host (found 2026-10-31). No outside network and no writes outside temp areas; localhost sockets and /tmp are allowed because
-  // BigCodeBench tests use them (the official harness runs in Docker with the same freedoms).
-  const profile = `(version 1)(allow default)(deny network*)(allow network-outbound (remote ip "localhost:*"))(allow network-bind (local ip "localhost:*"))(allow network-inbound (local ip "localhost:*"))(deny file-write*)(allow file-write* (subpath "${dir}") (subpath "/private${dir}") (subpath "/private/tmp") (subpath "/tmp") (subpath "/private/var/folders") (literal "/dev/null"))`;
-  return new Promise((res) => {
-    const child = execFile("/usr/bin/sandbox-exec", ["-p", profile, PY, "-I", join(dir, "prog.py")], { cwd: dir, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: { PATH: "/usr/bin:/bin", HOME: dir, PYTHONDONTWRITEBYTECODE: "1" } },
-      (err: any, stdout, stderr) => { rmSync(dir, { recursive: true, force: true }); res({ ok: !err, out: String(stdout ?? "") + (err ? String(stderr ?? "").slice(-3000) : "") + (err?.killed ? "\n[timeout]" : "") }); });   // full stdout: long answers must compare whole
-    child.stdin?.end(stdin);
-  });
-}
 
 // ---------------------------------------------------------------- benchmarks
 const jsonl = (f: string) => readFileSync(join(DIR, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -167,13 +157,16 @@ export function sanitize(code: string): string {
   return c.split("\n").filter((l) => !/^\s*>>>/.test(l)).join("\n");
 }
 
-async function frontier(p: Problem): Promise<string> {
+async function frontier(p: Problem, tier: "cheap" | "strong" = "strong"): Promise<string> {
   const { OpenCodeFrontier } = await import("../../services/controller/frontier-opencode.ts");
-  const f = new OpenCodeFrontier({ agent: FRONTIER_AGENT });
-  const dir = mkdtempSync(join(tmpdir(), "afm-eval-codex-"));
-  const r = await f.run(`Write complete Python code for this task. Reply with only one python code block.\n\n${p.prompt}`, dir);
+  const agent = tier === "cheap" ? CHEAP_AGENT : FRONTIER_AGENT;
+  const f = new OpenCodeFrontier({ agent });
+  // codex-lead (experiment): afm_code needs a folder inside the home folder
+  const lead = agent === "codex-lead";
+  const dir = lead ? (mkdirSync(join(homedir(), "OnBud", "runtime", "tmp"), { recursive: true }), mkdtempSync(join(homedir(), "OnBud", "runtime", "tmp", "lead-"))) : mkdtempSync(join(tmpdir(), "afm-eval-codex-"));
+  const r = await f.run(`Write complete Python code for this task. Reply with only one python code block.${lead ? `\nFolder for afm_code: ${dir} (path: solution.py)` : ""}\n\n${p.prompt}`, dir);
   rmSync(dir, { recursive: true, force: true });
-  if (r.tokens) callTokens.push(r.tokens);
+  if (r.tokens) callTokens.push({ ...r.tokens, agent });
   const m = /```(?:python)?\n([\s\S]*?)```/.exec(r.text ?? "");
   const code = m ? m[1] : r.text ?? "";
   return p.entry && code && !new RegExp(`def\\s+${p.entry}\\b`).test(code) ? p.prompt + code : code;
@@ -202,22 +195,57 @@ async function solveV2(p: Problem): Promise<{ code: string; repairs: number; dec
 const V3 = TAG.startsWith("v3");
 // v4 = v3 + faster escalation in s1 (no format-fix retry; optionally no plan fields) + the lean Codex agent.
 const V4 = TAG.startsWith("v4");
+// --copilot: GitHub Copilot's inline completion (official language server, signed in) as the middle tier: tried when
+// AFM's code fails the examples, before Codex; in s1, algorithmic/hard tasks with examples are no longer sent to Codex
+// first. Counted in the result (stage "copilot").
+const WANT_COPILOT = args.includes("--copilot") || MODE === "copilot" || MODE === "s5";
+const COPILOT = WANT_COPILOT ? await (await import("../../services/frontier/copilot-ls.ts")).copilotFiller() : undefined;
+if (WANT_COPILOT && !COPILOT) { console.error("--copilot: the language server is not installed or not signed in"); process.exit(2); }
 async function solveV3(p: Problem): Promise<{ code: string; repairs: number; decima?: number; codex: boolean; extra?: any }> {
   const task = p.task!();
   const t0 = Date.now();
   const d = MODE === "s2" ? undefined : await codeDifficulty(decima, task.prompt);
   const triageMs = Date.now() - t0;
   const hard = (d ?? 0) >= HARD_T, algo = algorithmic(task);
-  if (MODE === "s1" && (algo || hard || !task.hasExamples) && codexBudget-- > 0)
+  if (MODE === "s1" && (algo || hard || !task.hasExamples) && !(COPILOT && task.hasExamples) && codexBudget-- > 0)
     return { code: await frontier(p), repairs: 0, decima: d, codex: true, extra: { route: "codex-first", why: algo ? "algorithmic" : hard ? "decima-hard" : "unverifiable", triageMs } };
-  const r = await solveAdaptive(afm, task, { extra: MODE !== "s1" && !algo && !hard, fast: V4 && MODE === "s1", plan: !(V4 && MODE === "s1" && NO_PLAN) });
+  const r = await solveAdaptive(afm, task, { extra: MODE !== "s1" && !algo && !hard, fast: V4 && MODE === "s1", plan: !(V4 && MODE === "s1" && NO_PLAN), copilot: COPILOT, fallback: MODE === "s1", opts: CODE_OPTS });
   const times = { triageMs, genMs: r.genMs, checkMs: r.checkMs };
   if (MODE === "s1" && r.examplesOk !== true && codexBudget-- > 0)
-    return { code: (await frontier(p)) || r.code, repairs: r.repairs, decima: d, codex: true, extra: { route: "escalated", stage: r.stage, examplesOk: r.examplesOk, afmCalls: r.afmCalls, ...times } };
-  return { code: r.code, repairs: r.repairs, decima: d, codex: false, extra: { route: "local", stage: r.stage, examplesOk: r.examplesOk, afmCalls: r.afmCalls, ...times } };
+    return { code: (await frontier(p)) || r.code, repairs: r.repairs, decima: d, codex: true, extra: { route: "escalated", stage: r.stage, examplesOk: r.examplesOk, afmCalls: r.afmCalls, stress: r.stress, ...times } };
+  return { code: r.code, repairs: r.repairs, decima: d, codex: false, extra: { route: "local", stage: r.stage, examplesOk: r.examplesOk, afmCalls: r.afmCalls, stress: r.stress, ...times } };
+}
+
+// S5 (2026-11-03): Copilot is AFM's code-writing tool. Copilot writes the code (inline completion, unlimited); the
+// statement's examples check it, and bounded retries carry the failure as a comment; Codex takes what still fails.
+// Who writes first follows policies/routing.yaml (copilot_mode, decima_code_hard_threshold), as in local jobs;
+// --copilot-mode balanced|saver overrides it.
+//   copilot  Copilot alone (no Codex), Decima score recorded: for the routing analysis
+//   s5       the tier above
+// The S5 graph lives in the code skill (services/controller/code-skill.ts solveCode); these flags set its options.
+const { codeOptions, policyTriage, solveCode, solveAdaptive } = await import("../../services/controller/code-skill.ts");
+const CODE_OPTS = codeOptions({
+  ...(args.includes("--no-stress") ? { stress: false } : {}),
+  ...(args.includes("--stress-ref") ? { reference: opt("--stress-ref", "copilot") as any } : {}),
+  ...(args.includes("--keep-inconclusive") ? { escalateInconclusive: false } : {}),
+  ...(args.includes("--no-patterns") ? { patterns: "off" as const } : {}),
+  ...(args.includes("--no-cascade") ? { cascade: false } : {}),
+  ...(args.includes("--contest-candidates") ? { contestCandidates: Number(opt("--contest-candidates", "1")) } : {}),
+});
+const TRIAGE = { ...(await policyTriage()), ...(args.includes("--copilot-mode") ? { mode: opt("--copilot-mode", "saver") as "balanced" | "saver" } : {}), hardAt: HARD_T };
+async function solveS5(p: Problem): Promise<{ code: string; repairs: number; decima?: number; codex: boolean; extra?: any }> {
+  const task = p.task!();
+  const t0 = Date.now();
+  const d = await codeDifficulty(decima, task.prompt);
+  // copilot mode: no frontier (Copilot alone); s5: Codex while the run's budget lasts
+  const frontierFn = MODE === "s5" ? async (tier: "cheap" | "strong") => (codexBudget-- > 0 ? await frontier(p, tier) : undefined) : undefined;
+  const r = await solveCode(task, { copilot: COPILOT!, afm, difficulty: d, frontier: frontierFn, opts: CODE_OPTS, triage: TRIAGE });
+  if (process.env.ONBUD_STRESS_DEBUG) console.error(`${p.id}: ${r.trace.join(" → ")}`);
+  return { code: r.code, repairs: r.repairs, decima: d, codex: r.codex, extra: { route: r.route, examplesOk: r.examplesOk, stress: r.stress, copilotCandidates: r.candidates, afmCalls: r.afmCalls, copilotMs: Date.now() - t0, notes: r.notes, tier: r.tier, trace: r.trace } };
 }
 
 async function solve(p: Problem): Promise<{ code: string; repairs: number; decima?: number; codex: boolean; extra?: any }> {
+  if ((MODE === "copilot" || MODE === "s5") && p.task) return solveS5(p);
   if ((V3 || V4) && ["s2", "s3", "s1"].includes(MODE) && p.task) return solveV3(p);
   if (V2 && ["s2", "s3", "s1"].includes(MODE) && p.task) return solveV2(p);
   if (MODE === "codex") { if (codexBudget-- <= 0) return { code: "", repairs: 0, codex: false }; return { code: await frontier(p), repairs: 0, codex: true }; }
@@ -256,10 +284,14 @@ let pass = 0, ms = 0, codex = 0;
 for (const p of items) {
   const t0 = Date.now();
   callTokens = [];
+  const cs0 = { ...((COPILOT as any)?.stats ?? { requests: 0, throttled: 0 }) };
   const s = await solve(p);
+  const cs1 = (COPILOT as any)?.stats;
+  const cpReq = cs1 ? { copilotReq: cs1.requests - cs0.requests, copilotThrottled: cs1.throttled - cs0.throttled } : {};
   const r = s.code ? await p.check(s.code) : { ok: false, out: "no code" };
   const dt = Date.now() - t0; ms += dt; if (r.ok) pass++; if (s.codex) codex++;
-  appendFileSync(out, JSON.stringify({ id: p.id, mode: MODE, pass: r.ok, ms: dt, repairs: s.repairs, decima_frontier: s.decima, codex: s.codex, ...(s.extra ?? {}), ...(callTokens.length ? { ctok: callTokens.reduce((a, t) => ({ input: a.input + t.input, output: a.output + t.output, reasoning: a.reasoning + t.reasoning, cacheRead: a.cacheRead + t.cacheRead })) } : {}), ...(TEMP ? { temp: TEMP } : {}), error: r.ok ? undefined : r.out.slice(-500) }) + "\n");
+  appendFileSync(out, JSON.stringify({ id: p.id, mode: MODE, pass: r.ok, ms: dt, repairs: s.repairs, decima_frontier: s.decima, codex: s.codex, codexCalls: callTokens.length, ...(s.extra ?? {}), ...cpReq, ...(callTokens.length ? { ctokCalls: callTokens, ctok: callTokens.reduce((a, t) => ({ input: a.input + t.input, output: a.output + t.output, reasoning: a.reasoning + t.reasoning, cacheRead: a.cacheRead + t.cacheRead })) } : {}), ...(TEMP ? { temp: TEMP } : {}), error: r.ok ? undefined : r.out.slice(-500) }) + "\n");
   console.log(`${r.ok ? "PASS" : "FAIL"} ${(dt / 1000).toFixed(1)}s r=${s.repairs}${s.codex ? " codex" : ""}${s.decima !== undefined ? ` d=${s.decima.toFixed(2)}` : ""}  ${p.id}`);
 }
 console.log(`${BENCH} ${MODE}: ${pass}/${items.length} pass@1 = ${(100 * pass / Math.max(1, items.length)).toFixed(1)}%  avg ${(ms / Math.max(1, items.length) / 1000).toFixed(1)}s  codex ${codex}${existsSync(out) ? `\nwritten ${out}` : ""}`);
+(COPILOT as { stop?: () => void } | undefined)?.stop?.();   // the language server would keep the process alive

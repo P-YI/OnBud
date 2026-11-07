@@ -2,7 +2,7 @@
 # Read-only environment feasibility report. Changes nothing.
 set -u
 
-OPENAFM_HOME="${OPENAFM_HOME:-$HOME/OpenAFM}"
+ONBUD_HOME="${ONBUD_HOME:-$HOME/OnBud}"
 AFM_PORT="${AFM_PORT:-11434}"
 
 section() { printf '\n== %s ==\n' "$1"; }
@@ -16,7 +16,7 @@ section "Resources"
 df -h / | awk 'NR==2 {print "  disk free: " $4 " (used " $5 ")"}'
 memory_pressure 2>/dev/null | awk -F': ' '/free percentage/ {print "  memory free: " $2}'
 sysctl -n vm.swapusage | sed 's/^/  swap: /'
-[ -d "$OPENAFM_HOME/runtime" ] && du -sh "$OPENAFM_HOME/runtime" | awk '{print "  runtime dir: " $1}'
+[ -d "$ONBUD_HOME/runtime" ] && du -sh "$ONBUD_HOME/runtime" | awk '{print "  runtime dir: " $1}'
 
 section "Tools"
 for c in fm apfel opencode ollama brew git node python3 uv cursor code; do
@@ -40,19 +40,19 @@ fi
 section "Non-loopback listeners (informational)"
 lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 && $9 !~ /^(127\.0\.0\.1|\[::1\])/ {print "  " $1, $9}' | sort -u
 
-section "OpenAFM services"
+section "OnBud services"
 for p in 11434 11435; do printf '  %-6s %s\n' "$p" "$(curl -s -m 2 "http://127.0.0.1:$p/health" | head -c 90 || echo down)"; done
-launchctl print "gui/$(id -u)/dev.openafm.agent" 2>/dev/null | grep -q "watch-path" && echo "  agent: auto-restart on code changes (node --watch-path)"
+launchctl print "gui/$(id -u)/dev.onbud.agent" 2>/dev/null | grep -q "watch-path" && echo "  agent: auto-restart on code changes (node --watch-path)"
 S="$HOME/.local/state/opencode/service.json"
 [ -f "$S" ] && printf '  opencode service: %s (perm %s)\n' "$(python3 -c "import json;d=json.load(open('$S'));print(d['url'],d['version'])")" "$(stat -f %Lp "$S")"
-[ -f "$OPENAFM_HOME/runtime/logs/mcp.jsonl" ] && printf '  openafm MCP: last event %s\n' "$(tail -1 "$OPENAFM_HOME/runtime/logs/mcp.jsonl" | cut -c1-110)"
-printf '  token file perm: %s\n' "$(stat -f %Lp "$OPENAFM_HOME/config/apfel.token" 2>/dev/null)"
-printf '  sqlite perm:     %s\n' "$(stat -f %Lp "$OPENAFM_HOME/runtime/db/openafm.sqlite" 2>/dev/null)"
+[ -f "$ONBUD_HOME/runtime/logs/mcp.jsonl" ] && printf '  onbud MCP: last event %s\n' "$(tail -1 "$ONBUD_HOME/runtime/logs/mcp.jsonl" | cut -c1-110)"
+printf '  token file perm: %s\n' "$(stat -f %Lp "$ONBUD_HOME/config/apfel.token" 2>/dev/null)"
+printf '  sqlite perm:     %s\n' "$(stat -f %Lp "$ONBUD_HOME/runtime/db/onbud.sqlite" 2>/dev/null)"
 
 section "Local capabilities"
-printf '  pdftext (PDFKit+Vision): %s\n' "$([ -x "$OPENAFM_HOME/runtime/bin/pdftext" ] && echo built || echo 'missing (scripts/build-tools.sh)')"
+printf '  pdftext (PDFKit+Vision): %s\n' "$([ -x "$ONBUD_HOME/runtime/bin/pdftext" ] && echo built || echo 'missing (scripts/build-tools.sh)')"
 printf '  tmux:   %s\n' "$(command -v tmux || echo '(not found)')"
 printf '  TeX:    %s\n' "$([ -x /Library/TeX/texbin/latexmk ] && /Library/TeX/texbin/pdflatex --version | head -1 || echo '(no MacTeX)')"
 command -v fm >/dev/null && printf '  fm models: %s\n' "$(NO_COLOR=1 fm respond --help 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | awk '/MODELS/{f=1;next} f&&NF{print $1}' | tr '\n' ' ')"
 printf '  SearXNG: %s\n' "$(curl -s -m 2 http://127.0.0.1:8888/healthz >/dev/null && echo running || echo 'not running (web search uses DuckDuckGo/arXiv/Wikipedia)')"
-printf '  Decima (Ollaya 11436): %s\n' "$(curl -s -m 2 http://127.0.0.1:11436/api/tags >/dev/null && echo running || ([ -x "$OPENAFM_HOME/runtime/ollaya/bin/ollaya" ] && echo 'installed, not running (scripts/decima-setup.sh start)' || echo 'not installed (scripts/decima-setup.sh install)'))"
+printf '  Decima (Ollaya 11436): %s\n' "$(curl -s -m 2 http://127.0.0.1:11436/api/tags >/dev/null && echo running || ([ -x "$ONBUD_HOME/runtime/ollaya/bin/ollaya" ] && echo 'installed, not running (scripts/decima-setup.sh start)' || echo 'not installed (scripts/decima-setup.sh install)'))"

@@ -3,8 +3,8 @@
 # Token is passed via APFEL_TOKEN (env), never on the command line, so it does not show up in `ps`.
 set -eu
 
-OPENAFM_HOME="${OPENAFM_HOME:-$HOME/OpenAFM}"
-TOKEN_FILE="$OPENAFM_HOME/config/apfel.token"
+ONBUD_HOME="${ONBUD_HOME:-$HOME/OnBud}"
+TOKEN_FILE="$ONBUD_HOME/config/apfel.token"
 AFM_PORT="${AFM_PORT:-11434}"
 
 if [ ! -s "$TOKEN_FILE" ]; then

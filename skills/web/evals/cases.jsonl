@@ -1,0 +1,1 @@
+{"id": "web-needs-approval", "q": "Search the web for the SearXNG JSON API", "root": "none", "expect": {"skill": "web", "cited": false}}

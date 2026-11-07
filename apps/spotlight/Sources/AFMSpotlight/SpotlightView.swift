@@ -1,6 +1,6 @@
 // Panel content: the question field, attachments, folder/model/attach/history menus, quick actions for the
 // folder, streamed answers with live progress, approve/deny buttons for what the controller waits for,
-// and a setup screen when no OpenAFM backend is installed or running.
+// and a setup screen when no OnBud backend is installed or running.
 import AppKit
 import SpotlightCore
 import SwiftUI
@@ -48,16 +48,16 @@ struct SpotlightView: View {
         .onReceive(NotificationCenter.default.publisher(for: .spotlightShown)) { _ in focused = true }
     }
 
-    /** Top: OpenAFM logo + the question field. */
+    /** Top: OnBud logo + the question field. */
     private var inputRow: some View {
         HStack(spacing: 12) {
             Group {
-                if let logo = Bundle.main.image(forResource: "PanelIcon") { Image(nsImage: logo).resizable().interpolation(.high) }
+                if let logo = Bundle.main.image(forResource: "PanelIcon") { Image(nsImage: logo).resizable().interpolation(.high).aspectRatio(contentMode: .fit) }
                 else { Image(systemName: "sparkle.magnifyingglass").resizable() }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 34, height: 34)
             .opacity(state.running ? 0.45 : 1)
-            TextField(state.needsApproval ? "Reply, or use the buttons below" : state.attachments.isEmpty ? "Ask OpenAFM" : "Ask about the attached items", text: $state.query)
+            TextField(state.needsApproval ? "Reply, or use the buttons below" : state.attachments.isEmpty ? "Ask OnBud" : "Ask about the attached items", text: $state.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22))
                 .focused($focused)
@@ -67,6 +67,7 @@ struct SpotlightView: View {
         }
         .padding(.horizontal, 18)
         .frame(height: 60)
+        .background(WindowDragArea())   // drag the panel by its top row
     }
 
     private var attachmentRow: some View {
@@ -100,7 +101,7 @@ struct SpotlightView: View {
                 Button("Choose folder…", action: pickFolder)
             } label: { Label(folderName, systemImage: "folder") }
             .menuStyle(.button).buttonStyle(Chip()).fixedSize()
-            .help(state.projectRoot ?? "Pick the project folder OpenAFM may read")
+            .help(state.projectRoot ?? "Pick the project folder OnBud may read")
 
             Menu {
                 Picker("Model", selection: $state.useDecima) {
@@ -128,7 +129,7 @@ struct SpotlightView: View {
             Menu {
                 Button("Paste from clipboard") { state.attachClipboard() }
                 Button("Choose files…", action: pickFiles)
-                Text("Or drop files on the panel, or use Services > Ask OpenAFM in any app")
+                Text("Or drop files on the panel, or use Services > Ask OnBud in any app")
             } label: { Image(systemName: "paperclip") }
             .menuStyle(.button).buttonStyle(Chip()).fixedSize()
             .help("Attach files or the clipboard")
@@ -161,6 +162,28 @@ struct SpotlightView: View {
         .frame(height: 44)
     }
 
+    /** "▸ 3 earlier answers folded": unfolds the earlier answers of this chat (at most five; older ones are in History). */
+    private var earlierRow: some View {
+        let n = state.turns.count - 1
+        return Button { state.showEarlier.toggle() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: state.showEarlier ? "chevron.down" : "chevron.right").font(.caption.weight(.semibold))
+                Text("\(n) earlier answer\(n == 1 ? "" : "s") \(state.showEarlier ? "shown" : "folded")")
+                if !state.showEarlier, let prev = state.turns.dropLast().last {
+                    Text("· last: “\(prev.prompt.prefix(40))”").lineLimit(1).foregroundStyle(.tertiary)
+                }
+                if state.olderInHistory > 0 {
+                    Text("· \(state.olderInHistory) older in History").foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            .font(.callout).foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(state.showEarlier ? "Fold the earlier answers" : "Show the earlier answers of this chat (older ones: clock menu > History)")
+    }
+
     /** Folded answers: one line, click to unfold. */
     private var collapsedBar: some View {
         Button { state.collapsed = false } label: {
@@ -168,7 +191,7 @@ struct SpotlightView: View {
                 Image(systemName: "text.bubble")
                 Text(state.turns.last.map { "“\($0.prompt.prefix(50))”" } ?? "")
                     .lineLimit(1)
-                Text("· \(state.turns.count) answer\(state.turns.count == 1 ? "" : "s") folded")
+                Text("· \(state.turns.count) answer\(state.turns.count == 1 ? "" : "s") folded" + (state.olderInHistory > 0 ? ", \(state.olderInHistory) more in History" : ""))
                     .foregroundStyle(.tertiary)
                 Spacer()
                 if state.needsApproval || state.offersHandoff { Text("waiting for you").foregroundStyle(.orange) }
@@ -205,7 +228,13 @@ struct SpotlightView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        ForEach(state.turns) { t in TurnView(turn: t, state: state).id(t.id) }
+                        // Earlier answers stay folded (unfold them here); only the latest one is open.
+                        if state.turns.count > 1 { earlierRow }
+                        if state.showEarlier {
+                            ForEach(state.turns.dropLast()) { t in TurnView(turn: t, state: state).id(t.id) }
+                            Divider().opacity(0.5)
+                        }
+                        if let last = state.turns.last { TurnView(turn: last, state: state).id(last.id) }
                     }
                     .padding(.horizontal, 18).padding(.top, 12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -273,13 +302,31 @@ struct SpotlightView: View {
 struct TurnView: View {
     let turn: Turn
     @ObservedObject var state: AppState
+    /** The route line names Copilot, or a job note says "copilot: …" (an answer merely about Copilot does not count). */
+    static func usedCopilot(meta: String, reply: String) -> Bool {
+        meta.range(of: "copilot", options: .caseInsensitive) != nil
+            || reply.range(of: #"(^|\n)\s*[-•*]?\s*`?copilot: "#, options: .regularExpression) != nil
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                Text(turn.prompt).font(.headline).foregroundStyle(.secondary).lineLimit(3)
-                Spacer()
+                // The question as an AppKit selectable label: SwiftUI's text selection did not take on this line.
+                SelectableLabel(text: turn.prompt, font: .systemFont(ofSize: NSFont.systemFontSize + 1, weight: .semibold), color: .secondaryLabelColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contextMenu {
+                        Button("Copy question") { state.copy(turn, .question) }
+                        Button("Ask again (edit in the field)") { state.reuse(turn) }
+                    }
                 if !turn.running && !turn.reply.isEmpty {
-                    Button { state.copy(turn) } label: { Image(systemName: "doc.on.doc") }.help("Copy the answer")
+                    Menu {
+                        Button("Copy answer") { state.copy(turn, .answer) }
+                        Button("Copy question") { state.copy(turn, .question) }
+                        Button("Copy question and answer") { state.copy(turn, .both) }
+                        Divider()
+                        Button("Ask again (edit in the field)") { state.reuse(turn) }
+                    } label: { Image(systemName: "doc.on.doc") } primaryAction: { state.copy(turn, .answer) }
+                    .menuStyle(.borderlessButton).menuIndicator(.visible).fixedSize()
+                    .help("Copy the answer (click), or choose: question, both, ask again")
                     Button { state.save(turn) } label: { Image(systemName: "square.and.arrow.down") }.help("Save the answer as Markdown")
                 }
             }
@@ -294,7 +341,18 @@ struct TurnView: View {
                 HStack(spacing: 6) { ProgressView().controlSize(.small); Text(turn.progress ?? "Working on it…").foregroundStyle(.secondary) }
             }
             if let error = turn.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
-            if let meta = turn.meta { Text(meta).font(.caption).foregroundStyle(.tertiary) }
+            if let meta = turn.meta {
+                HStack(spacing: 6) {
+                    // The controller's route line; routes through the Copilot tier (S5) get a label.
+                    if Self.usedCopilot(meta: meta, reply: turn.reply) {
+                        Label("Copilot", systemImage: "chevron.left.forwardslash.chevron.right")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.purple)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.12), in: Capsule())
+                    }
+                    Text(meta).font(.caption).foregroundStyle(.tertiary)
+                }
+            }
         }
         .textSelection(.enabled)
     }
@@ -306,28 +364,65 @@ struct MarkdownText: View {
     var root: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(MarkdownBlocks.parse(text).enumerated()), id: \.offset) { _, b in block(b) }
+            ForEach(Array(Self.groups(MarkdownBlocks.parse(text)).enumerated()), id: \.offset) { _, g in group(g) }
         }
+    }
+
+    /** Runs of headings, paragraphs, lists and quotes become one Text, so a drag selects across them (SwiftUI
+     *  selects within one Text only); code blocks, tables and rules stay separate views. */
+    enum Group { case text([MDBlock]), block(MDBlock) }
+    static func groups(_ blocks: [MDBlock]) -> [Group] {
+        var out: [Group] = [], run: [MDBlock] = []
+        for b in blocks {
+            switch b {
+            case .heading, .paragraph, .bullet, .quote: run.append(b)
+            default:
+                if !run.isEmpty { out.append(.text(run)); run = [] }
+                out.append(.block(b))
+            }
+        }
+        if !run.isEmpty { out.append(.text(run)) }
+        return out
+    }
+
+    @ViewBuilder private func group(_ g: Group) -> some View {
+        switch g {
+        case .text(let blocks): Text(flowed(blocks)).fixedSize(horizontal: false, vertical: true)
+        case .block(let b): block(b)
+        }
+    }
+
+    private func flowed(_ blocks: [MDBlock]) -> AttributedString {
+        var out = AttributedString()
+        for (i, b) in blocks.enumerated() {
+            if i > 0 {
+                // Blank line between paragraphs and around headings; list items and quote lines stay together.
+                let tight: Bool = { switch (blocks[i - 1], b) { case (.bullet, .bullet), (.quote, .quote): return true; default: return false } }()
+                out += AttributedString(tight ? "\n" : "\n\n")
+            }
+            switch b {
+            case .heading(let level, let t):
+                var h = Self.inline(t, root: root)
+                h.font = level <= 2 ? .title3.weight(.semibold) : .headline
+                out += h
+            case .paragraph(let t):
+                out += Self.inline(t, root: root)
+            case .bullet(let indent, let marker, let t):
+                var m = AttributedString(String(repeating: "    ", count: indent) + marker + "  ")
+                m.foregroundColor = .secondary
+                out += m + Self.inline(t, root: root)
+            case .quote(let t):
+                var q = AttributedString("▎ ") + Self.inline(t, root: root)
+                q.foregroundColor = .secondary
+                out += q
+            default: break
+            }
+        }
+        return out
     }
 
     @ViewBuilder private func block(_ b: MDBlock) -> some View {
         switch b {
-        case .heading(let level, let t):
-            Text(Self.inline(t, root: root))
-                .font(level <= 2 ? .title3.weight(.semibold) : .headline)
-                .padding(.top, 4)
-        case .paragraph(let t):
-            Text(Self.inline(t, root: root)).font(.body).fixedSize(horizontal: false, vertical: true)
-        case .bullet(let indent, let marker, let t):
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(marker).foregroundStyle(.secondary).frame(minWidth: 14, alignment: .trailing)
-                Text(Self.inline(t, root: root)).fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.leading, CGFloat(indent) * 16)
-        case .quote(let t):
-            Text(Self.inline(t, root: root)).foregroundStyle(.secondary)
-                .padding(.leading, 10)
-                .overlay(alignment: .leading) { Rectangle().fill(.tertiary).frame(width: 3) }
         case .code(_, let t):
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(t).font(.system(.callout, design: .monospaced)).textSelection(.enabled).padding(10)
@@ -338,6 +433,8 @@ struct MarkdownText: View {
             TableBlock(header: header, rows: rows, root: root)
         case .rule:
             Divider().padding(.vertical, 4)
+        default:
+            Text(flowed([b])).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -412,21 +509,21 @@ struct SetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if state.status.nothingInstalled {
-                Text("Set up OpenAFM").font(.headline)
-                Text("OpenAFM answers with Apple's on-device model through apfel and its own controller. Setup opens Terminal, checks what is missing (Homebrew, apfel, Node.js) and asks before installing each one from its own project, then starts both services on this Mac only.")
+                Text("Set up OnBud").font(.headline)
+                Text("OnBud answers with Apple's on-device model through apfel and its own controller. Setup opens Terminal, checks what is missing (Homebrew, apfel, Node.js) and asks before installing each one from its own project, then starts both services on this Mac only.")
                     .foregroundStyle(.secondary)
                 Text("Requires an Apple silicon Mac with macOS 26 or later and Apple Intelligence turned on.").font(.callout).foregroundStyle(.secondary)
             } else {
                 Text("The AFM controller is not reachable").font(.headline)
                 StatusList(status: state.status)
                 Text("The LaunchAgents start it at login. To start it now:").foregroundStyle(.secondary)
-                Text("launchctl kickstart -k gui/\(getuid())/dev.openafm.agent")
+                Text("launchctl kickstart -k gui/\(getuid())/dev.onbud.agent")
                     .font(.system(.callout, design: .monospaced)).textSelection(.enabled)
             }
             if let notice = state.notice { Text(notice).font(.callout).foregroundStyle(.secondary) }
             HStack {
                 if state.status.nothingInstalled || !state.status.checkout {
-                    Button("Set up OpenAFM…") { state.runSetup() }.buttonStyle(.borderedProminent)
+                    Button("Set up OnBud…") { state.runSetup() }.buttonStyle(.borderedProminent)
                     Button("Check again") { Task { await state.probe() } }
                 } else {
                     Button("Check again") { Task { await state.probe() } }.buttonStyle(.borderedProminent)
@@ -445,11 +542,11 @@ struct StatusList: View {
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
             row("AFM (apfel) · 127.0.0.1:11434", status.apfel)
-            row("OpenAFM controller · 127.0.0.1:11435", status.controller)
+            row("OnBud controller · 127.0.0.1:11435", status.controller)
             row("Router model (Ollaya) · 127.0.0.1:11436", status.decima, optional: true)
-            row("~/OpenAFM checkout", status.checkout)
+            row("~/OnBud checkout", status.checkout)
             row("Controller token", status.token)
-            row("LaunchAgents dev.openafm.agent / .apfel", status.agentLaunchAgent && status.apfelLaunchAgent)
+            row("LaunchAgents dev.onbud.agent / .apfel", status.agentLaunchAgent && status.apfelLaunchAgent)
         }
     }
     private func row(_ name: String, _ ok: Bool, optional: Bool = false) -> some View {
@@ -483,4 +580,35 @@ extension Color {
 
 extension Notification.Name {
     static let spotlightShown = Notification.Name("AFMSpotlightShown")
+}
+
+/** A wrapping, selectable AppKit label (drag to select, ⌘C) that sizes itself to the width SwiftUI offers. */
+struct SelectableLabel: NSViewRepresentable {
+    let text: String
+    var font: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
+    var color: NSColor = .labelColor
+
+    func makeNSView(context: Context) -> NSTextField {
+        let f = NSTextField(wrappingLabelWithString: text)
+        f.isSelectable = true
+        f.isEditable = false
+        f.drawsBackground = false
+        f.isBordered = false
+        f.lineBreakMode = .byWordWrapping
+        f.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return f
+    }
+
+    func updateNSView(_ f: NSTextField, context: Context) {
+        if f.stringValue != text { f.stringValue = text }
+        f.font = font
+        f.textColor = color
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView f: NSTextField, context: Context) -> CGSize? {
+        let width = proposal.width ?? 600
+        f.preferredMaxLayoutWidth = width
+        let h = f.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height ?? 20
+        return CGSize(width: width, height: ceil(h))
+    }
 }

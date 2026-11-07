@@ -1,0 +1,3 @@
+{"id": "convert-merge-pdf-ko", "family": "convert", "act": true, "cwd": "fixture", "q": "part1.pdf랑 part2.pdf 하나로 합쳐줘", "root": "fixture:convert-docs", "expect": {"skill": "convert", "answer": "part1 \\(merged( \\d+)?\\)\\.pdf"}}
+{"id": "convert-image-en", "family": "convert", "act": true, "cwd": "fixture", "q": "Convert cover.png to jpg, 400 px wide", "root": "fixture:convert-docs", "expect": {"skill": "convert", "answer": "cover \\(converted( \\d+)?\\)\\.jpg[\\s\\S]*400 px"}}
+{"id": "convert-doc-routed", "family": "convert", "act": true, "cwd": "fixture", "q": "Please turn memo.txt into a Word file", "root": "fixture:convert-docs", "expect": {"skill": "convert", "answer": "memo \\(converted( \\d+)?\\)\\.docx"}}

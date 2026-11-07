@@ -15,13 +15,16 @@
 //   slides_outline   pptx titles in presentation order, slide count, or the Nth slide verbatim (code only)
 //   git_overview     branch, upstream ahead/behind, worktrees, stash, branches (code); git fetch only after approval
 //   open_app         a terminal (in the folder, or attached to a background session) or a file in the user's own app:
-//                    named in the request, ~/OpenAFM/config/apps.json, or the macOS default (apps.ts)
+//                    named in the request, ~/OnBud/config/apps.json, or the macOS default (apps.ts)
+//   copilot          GitHub Copilot through VS Code (its unlimited chat, inline and next-edit suggestions): hand the
+//                    request to `code chat`, or show the plan's remaining usage (copilot.ts reads gh's API)
+//   launch_app       "<app> 열어줘" / "open <app>": any installed app, found by name with Spotlight (apps.ts)
 //   security_check   secrets in the project (git state), credential files and shell history, system security
 //                    settings and exposed ports; all decided in code, values masked (security-check.ts)
 //   mac_health       this Mac's status from its own tools (mac-health.ts); no project folder needed, nothing leaves the Mac
 //   github_status    open PRs, this branch's PR and checks, recent workflow runs, issues: gh read-only, signed-in user
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import type { AFMProvider } from "../afm-adapter/provider.ts";
 import { readDocument } from "../context-builder/documents.ts";
@@ -30,8 +33,15 @@ import type { DecimaClient } from "../laya-router/decima.ts";
 import { redact } from "../security/gate.ts";
 import { sha, type EditProposal } from "./edit-loop.ts";
 import { projectFiles } from "./jobs.ts";
+import { browserTab, convert, macControl, personal, shortcutsSkill } from "./mac-tasks.ts";
+import { serverIntent } from "../server/server-skill.ts";
 
-export type LocalSkill = "commit_message" | "change_summary" | "release_notes" | "error_triage" | "extract_table" | "translate" | "docstrings" | "privacy_scan" | "csv_json" | "sheet_lookup" | "slides_outline" | "git_overview" | "github_status" | "mac_health" | "open_app" | "security_check";
+export type LocalSkill = "commit_message" | "change_summary" | "release_notes" | "error_triage" | "extract_table" | "translate" | "docstrings" | "privacy_scan" | "csv_json" | "sheet_lookup" | "slides_outline" | "git_overview" | "github_status" | "mac_health" | "open_app" | "security_check" | "launch_app" | "copilot"
+  | "convert" | "shortcuts" | "mac_control" | "browser_tab" | "personal" | "server";
+/** Skills that work without a project folder, and skills a delegated (read-only, MCP) task never runs. */
+export const NO_ROOT = new Set<LocalSkill>(["convert", "mac_health", "open_app", "security_check", "launch_app", "copilot", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
+export const WRITES_FILES = new Set<LocalSkill>(["csv_json", "convert", "translate", "docstrings"]);
+export const NOT_DELEGATED = new Set<LocalSkill>(["open_app", "launch_app", "copilot", "convert", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
 export interface SkillContext { afm: AFMProvider; root: string; prompt: string; files: { path: string }[]; ko: boolean; history?: string; decima?: DecimaClient; timeoutMs?: number }
 export interface SkillResult { answer: string; verified: boolean; pendingEdit?: { edit: EditProposal; testCmd?: string }; pendingCommand?: string; detail: string; declined?: boolean }   // declined: not this skill after all; the controller goes on
 
@@ -42,6 +52,17 @@ const GIT_HOWTO = /(사용법|명령어|어떻게\s?(써|사용|만들|하는|�
 // GitHub (pull requests, checks, workflow runs, issues): read with the signed-in gh CLI, never written.
 const GH_REQ = /(\bPRs?\b|pull requests?|풀\s?리퀘(스트)?|\bCI\b|github actions|workflow runs?|워크플로|(github|깃허브).{0,20}(이슈|issues?|체크|checks?|리뷰|reviews?|상태|status|빌드|build))/i;
 const SLIDE_NTH = /(\d+)\s?(번째|번|쪽|페이지|장)\s?(슬라이드|페이지|장)?|(첫|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s?번째|\bslide\s?#?(\d+)\b|\b(\d+)(st|nd|rd|th) slide\b|\b(first|second|third|fourth|fifth|last) slide\b|마지막\s?(슬라이드|장)/i;
+/** The app name in "<name> (앱) 열어줘/실행해줘/켜줘" or "open/launch <name> (app)", or undefined. Paths, URLs and
+ *  folders are not apps; "start"/"run" count only with the word "app" ("run npm test" is a command). */
+export function launchTarget(prompt: string): { name: string; explicit: boolean } | undefined {
+  const p = prompt.trim().replace(/[.!?。]+$/, "");
+  if (p.length > 60 || /[/\\]|https?:|\.\w{1,5}\b|폴더|디렉토리|folder|directory|파일|\bfiles?\b|터미널|terminal|세션|session/i.test(p)) return undefined;
+  const ko = /^(.+?)\s*(앱|어플|어플리케이션|애플리케이션|프로그램)?\s*(을|를|좀)?\s*(열어|실행해|실행시켜|켜|띄워|시작해)\s*(줘|주세요|줄래|줄래요|봐)?$/.exec(p);
+  if (ko) return { name: ko[1].replace(/\s*(을|를)$/, "").trim(), explicit: !!ko[2] };
+  const en = /^(?:please\s+)?(open|launch|start|run)\s+(?:the\s+|my\s+)?(.+?)(\s+app(?:lication)?)?(?:\s+please)?$/i.exec(p);
+  if (en && (/^(open|launch)$/i.test(en[1]) || en[3])) return { name: en[2].trim(), explicit: !!en[3] };
+  return undefined;
+}
 const SECURITY_CHECK = /((보안|security)\s?.{0,10}(점검|검사|진단|취약|감사|check|audit|scan|review)|(비밀번호|암호|패스워드|password|api\s?키|키|토큰|token|secrets?|시크릿|자격\s?증명|credentials?)\S*\s?.{0,12}(유출|노출|새|leak|exposed|exposure|점검|검사|스캔|scan)|secret scan|vulnerabilit|취약점|\b(leak(ed|s)?|exposed|hard-?coded)\s+(api\s)?(secrets?|keys?|tokens?|passwords?|credentials?))/i;
 const OPEN_TERMINAL = /((터미널|terminal|iterm2?|아이텀|셸|warp|ghostty)[^\n?]{0,15}(열어|띄워|켜\s?줘|열기)|\b(open|launch|start)\s+(a\s+|the\s+|new\s+)*(terminal|shell|iterm2?)\b|\b(open|show|attach)\b.{0,25}\bsession\b.{0,25}\b(terminal|iterm)|(세션|session)\S*.{0,20}(터미널|iterm|아이텀)\S*.{0,10}(열어|띄워|붙어|attach|보여))/i;
 const OPEN_EDITOR = /((에디터|편집기|editor|vs\s?code|cursor|zed|textedit|커서)\S*\s?(에서|으로|로)?\s?(열어|띄워)|\bopen\b.{0,40}\b(in|with)\s+(my\s+)?(editor|vs\s?code|cursor|zed|textedit)\b)/i;
@@ -49,8 +70,30 @@ const MAC_HEALTH = /((맥|맥북|mac|macbook|시스템|컴퓨터|노트북|기�
 const SHEET_EXT = /\.(xlsx|xlsm|csv|tsv)$/i;
 const TEXT_EXT = /\.(md|markdown|txt|rst|tex|org|html?|csv|log|pdf|docx?|pptx?|rtf|pages)$/i;
 
+// How-to questions are answered, not executed, by every skill that produces or changes something.
+const HOWTO = /(방법|사용법|어떻게|하는\s?법|how (do|to|can|should) (i|you|we)\b)/i;
+const ACTING = new Set<LocalSkill>(["commit_message", "release_notes", "docstrings", "csv_json", "translate", "extract_table"]);
+
+const TRACEBACK = /(Traceback \(most recent call last\)|^\s*File ".+", line \d+)/m;
+
+/** The request without the launcher's attached-text blocks. */
+export function questionPart(prompt: string): string {
+  const i = prompt.search(/\n\nText \([^)\n]{1,40}\):\n"""/);
+  return i > 0 ? prompt.slice(0, i) : prompt;
+}
+
 /** Which local skill a request asks for (rules only; undefined = not one of these). */
 export function detectLocalSkill(prompt: string, files: { path: string }[]): LocalSkill | undefined {
+  // The rules read the request, not text the launcher attached after it ("Text (clipboard):\n\"\"\"…\"\"\""):
+  // pasted text that mentions "mute" or "clipboard" is content to answer from, not a command.
+  // Only a pasted traceback still counts (error triage reads the log it is given).
+  const full = prompt;
+  prompt = questionPart(prompt);
+  const s = detectByRules(prompt, files) ?? (full !== prompt && TRACEBACK.test(full) ? "error_triage" : undefined);
+  return s && ACTING.has(s) && HOWTO.test(prompt) ? undefined : s;
+}
+
+function detectByRules(prompt: string, files: { path: string }[]): LocalSkill | undefined {
   const p = prompt;
   const has = (re: RegExp) => files.some((f) => re.test(f.path));
   // A message to write, not a question about existing commits ("What are the 3 most recent commit messages?").
@@ -58,8 +101,14 @@ export function detectLocalSkill(prompt: string, files: { path: string }[]): Loc
   if (/(릴리[스즈]\s?노트|release\s+notes?|changelog|변경\s?이력)/i.test(p)) return "release_notes";
   if ((/((변경\s?사항|변경된|바뀐|수정된|uncommitted|working tree|changes|diff).{0,30}(요약|정리|설명|summar|overview|describe))|(summari[sz]e|describe).{0,30}(changes|diff)/i.test(p)
       || /(what (did|have) (i|we) (change|changed|modif)|since the last commit|마지막 커밋 (이후|뒤|다음)|(뭘|뭐|무엇을?) (바꿨|고쳤|수정했))/i.test(p)) && !files.some((f) => !LOG_EXT.test(f.path) && TEXT_EXT.test(f.path))) return "change_summary";
+  if (/(copilot|코파일럿)/i.test(p) && /(크레딧|credits?|quota|사용량|남은|한도|limit|usage|보내|물어|넘겨|맡겨|열어|ask|send|hand|chat|채팅)/i.test(p) && !/(사용법|how to|설정 방법)/i.test(p)) return "copilot";
   if (SECURITY_CHECK.test(p) && !GIT_HOWTO.test(p)) return "security_check";
+  // a remote machine (skills/server): before "터미널 열어" so "gpu1 서버 터미널 열어줘" opens the server, not a local shell
+  if (!HOWTO.test(p) && serverIntent(p)) return "server";
   if (OPEN_TERMINAL.test(p) || (OPEN_EDITOR.test(p) && files.length)) return "open_app";
+  // system controls before "<name> 켜줘" is read as an app to launch ("다크 모드 켜줘")
+  if (/(다크\s?모드|라이트\s?모드|dark mode|light mode|볼륨|음량|\bvolume\b|음소거|\b(un)?mute\b|스크린\s?샷|화면\s?캡처|screenshot|클립보드|clipboard)/i.test(p)) return "mac_control";
+  if (!files.length && launchTarget(p)) return "launch_app";
   if (MAC_HEALTH.test(p) && !GIT_HOWTO.test(p)) return "mac_health";
   if (GH_REQ.test(p)) return "github_status";
   if (GIT_STATE.test(p) && !GIT_HOWTO.test(p)) return "git_overview";
@@ -70,9 +119,34 @@ export function detectLocalSkill(prompt: string, files: { path: string }[]): Loc
   if (has(/\.pptx$/i) && (SLIDE_NTH.test(p) || /(제목|목차|개요|아웃라인|구성|순서|몇\s?장|슬라이드\s?(목록|수|개수)|outline|titles?|agenda|table of contents|how many slides)/i.test(p))) return "slides_outline";
   if (has(SHEET_EXT) && !/(요약|개요|구조|설명해|summar|overview|describe|structure)/i.test(p)) return "sheet_lookup";
   if (has(LOG_EXT) && /(에러|오류|error|exception|traceback|원인|cause|crash|실패|fail|왜)/i.test(p)) return "error_triage";
-  if (/(Traceback \(most recent call last\)|^\s*File ".+", line \d+)/m.test(p)) return "error_triage";
+  if (TRACEBACK.test(p)) return "error_triage";
   if (has(TEXT_EXT) && /(할\s?일|담당|마감|action items?|to-?dos?|deadlines?|owners?)/i.test(p) && /(표|테이블|table|목록|list|정리|추출|extract)/i.test(p)) return "extract_table";
+  // P6: common Mac tasks (mac-tasks.ts); the router catches other wordings
+  if (has(/\.(png|jpe?g|heic|heif|tiff?|gif|bmp|webp|pdf|txt|rtf|html?|docx?|odt)$/i) && /(변환|바꿔|convert|resize|크기|줄여|합쳐|합치|병합|merge|combine|압축|zip|compress|\b(turn|make|save|export)\b.{1,40}\b(into|as)\b|(으)?로\s?(만들어|저장))/i.test(p)) return "convert";
+  if (/(단축어|\bshortcuts?\b)/i.test(p) && /(목록|리스트|\blist\b|실행|돌려|\brun\b|설치|install|뭐\s?있|what|만들|생성|\b(create|make|new|build)\b)/i.test(p)) return "shortcuts";
+  if (/((current|this|open|front)\s+(browser\s+)?(tab|page)|(지금|현재)\s?(보고\s?있는|열린|열어\s?둔)\s?(탭|페이지|웹\s?페이지))/i.test(p)) return "browser_tab";
+  if (/(일정|캘린더|calendar|schedule|미리\s?알림|리마인더|reminders?)/i.test(p) && /(오늘|내일|이번\s?주|today|tomorrow|this week|뭐|what|보여|show|list|알려|있어)/i.test(p)) return "personal";
   return undefined;
+}
+
+/** For a skill the router picked (not a rule match): what the skill itself needs, so a pick that cannot apply is
+ *  dropped. The same file conditions as the rules above; how-to questions are answered, not executed. */
+export function routedSkillApplies(skill: LocalSkill, prompt: string, files: { path: string }[]): boolean {
+  const has = (re: RegExp) => files.some((f) => re.test(f.path));
+  if (HOWTO.test(prompt)) return false;
+  switch (skill) {
+    case "docstrings": return has(/\.py$/);
+    case "convert": return has(/\.(png|jpe?g|heic|heif|tiff?|gif|bmp|webp|pdf|txt|rtf|html?|docx?|odt)$/i);
+    case "csv_json": return has(/\.csv$/i);
+    case "sheet_lookup": return has(SHEET_EXT);
+    case "slides_outline": return has(/\.pptx$/i);
+    case "translate": case "privacy_scan": case "extract_table": return has(TEXT_EXT);
+    case "error_triage": return has(LOG_EXT) || /(Traceback|Error:|Exception)/.test(prompt);
+    case "open_app": return true;
+    case "launch_app": return !!launchTarget(prompt);
+    case "server": return serverIntent(prompt);
+    default: return true;
+  }
 }
 
 // ---------------------------------------------------------------- helpers
@@ -98,6 +172,12 @@ const str = (s: unknown) => (typeof s === "string" ? s.trim() : "");
 
 export async function runLocalSkill(skill: LocalSkill, c: SkillContext): Promise<SkillResult> {
   switch (skill) {
+    case "convert": return convert(c);
+    case "shortcuts": return shortcutsSkill(c);
+    case "mac_control": return macControl(c);
+    case "browser_tab": return browserTab(c);
+    case "personal": return personal(c);
+    case "server": { const { serverSkill } = await import("../server/server-skill.ts"); return serverSkill(c); }
     case "commit_message": return commitMessage(c);
     case "change_summary": return changeSummary(c);
     case "release_notes": return releaseNotes(c);
@@ -112,6 +192,8 @@ export async function runLocalSkill(skill: LocalSkill, c: SkillContext): Promise
     case "git_overview": return gitOverview(c);
     case "github_status": return githubStatus(c);
     case "open_app": return openApp(c);
+    case "launch_app": return launchApp(c);
+    case "copilot": { const { copilotSkill } = await import("./copilot.ts"); return copilotSkill(c); }
     case "security_check": { const { securityCheckAnswer } = await import("./security-check.ts"); const r = await securityCheckAnswer(c.root || undefined, c.ko); return { ...r, verified: true }; }
     case "mac_health": { const { macHealthAnswer } = await import("./mac-health.ts"); const r = await macHealthAnswer(c.ko); return { ...r, verified: true }; }
   }
@@ -718,19 +800,31 @@ async function slidesOutline(c: SkillContext): Promise<SkillResult> {
 async function openApp(c: SkillContext): Promise<SkillResult> {
   const A = await import("../context-builder/apps.ts");
   const K = c.ko;
-  const why = (w: string) => (w === "request" ? (K ? "요청한 앱" : "the app you named") : w === "config" ? (K ? "~/OpenAFM/config/apps.json 설정" : "~/OpenAFM/config/apps.json") : (K ? "시스템 기본 앱" : "the system default"));
-  const hint = K ? "\n\n_기본 앱을 바꾸려면 시스템 설정(브라우저·텍스트 파일), iTerm 메뉴의 **Make iTerm2 Default Term**(터미널), 또는 `~/OpenAFM/config/apps.json`에 `{\"terminal\": \"iTerm\", \"editor\": \"Cursor\"}`처럼 적으면 돼요._"
-    : "\n\n_To change it: System Settings (browser, text files), iTerm's **Make iTerm2 Default Term** (terminal), or `~/OpenAFM/config/apps.json` such as `{\"terminal\": \"iTerm\", \"editor\": \"Cursor\"}`._";
+  const why = (w: string) => (w === "request" ? (K ? "요청한 앱" : "the app you named") : w === "config" ? (K ? "~/OnBud/config/apps.json 설정" : "~/OnBud/config/apps.json") : (K ? "시스템 기본 앱" : "the system default"));
+  const hint = K ? "\n\n_기본 앱을 바꾸려면 시스템 설정(브라우저·텍스트 파일), 터미널 앱 메뉴의 기본 터미널 설정(iTerm: Make iTerm2 Default Term), 또는 `~/OnBud/config/apps.json`에 `{\"terminal\": \"iTerm\", \"editor\": \"Cursor\"}`처럼 적으면 돼요._"
+    : "\n\n_To change it: System Settings (browser, text files), the terminal app's own default-terminal setting (iTerm: Make iTerm2 Default Term), or `~/OnBud/config/apps.json` such as `{\"terminal\": \"iTerm\", \"editor\": \"Cursor\"}`._";
   const doc = c.files.find((f) => existsSync(join(c.root, f.path)));
   if (OPEN_EDITOR.test(c.prompt) && doc && !OPEN_TERMINAL.test(c.prompt)) {
     const ch = await A.chooseApp("editor", c.prompt);
     if (!ch) return { answer: K ? "열 앱을 찾지 못했어요." : "No app found to open it with.", verified: false, detail: "no_editor" };
-    const ok = await A.openWith(join(c.root, doc.path), ch);
+    // "src/x.py 45번째 줄" / "line 45": VS Code and Cursor open at the line (where inline suggestions and next edit
+    // suggestions, unlimited on every Copilot plan, are used).
+    const line = Number(/(\d+)\s?(번째\s?)?(줄|행|라인)|\bline\s?(\d+)|:(\d+)\b/i.exec(c.prompt)?.slice(1).find((x) => x && /^\d+$/.test(x)) ?? 0) || (c.files.find((f) => f.path === doc.path) as any)?.line;
+    const ok = await A.openAt(join(c.root, doc.path), line, ch);
     return { answer: (ok ? (K ? `\`${doc.path}\`를 **${A.appName(ch.app)}**에서 열었어요 (${why(ch.why)}).` : `Opened \`${doc.path}\` in **${A.appName(ch.app)}** (${why(ch.why)}).`) : (K ? "앱을 열지 못했어요." : "Could not open the app.")) + hint, verified: ok, detail: `editor ${A.appName(ch.app)} ${ch.why}` };
   }
   const ch = await A.chooseApp("terminal", c.prompt);
   if (!ch) return { answer: K ? "터미널 앱을 찾지 못했어요." : "No terminal app found.", verified: false, detail: "no_terminal" };
-  const cwd = c.root || process.env.HOME || "/";
+  // The folder named in the request ("home 디렉토리를 터미널에서 열어줘", "다운로드 폴더에서", "~/x", "docs 폴더"); the
+  // project folder only when none is named (it used to be the project folder always: the launcher's Desktop).
+  const picked = await terminalFolder(c.prompt, c.root);
+  if (picked.ask) return { answer: K ? `어느 폴더에서 열까요?\n\n${picked.ask.map((p) => `- \`${p.replace(process.env.HOME ?? "~", "~")}\``).join("\n")}` : `Which folder?\n\n${picked.ask.map((p) => `- \`${p.replace(process.env.HOME ?? "~", "~")}\``).join("\n")}`, verified: true, detail: "folder_ambiguous" };
+  if (picked.missing) {
+    const where = picked.missing.in ? `\`${picked.missing.in.replace(process.env.HOME ?? "~", "~")}\` ${K ? "안에서 " : "inside "}` : "";
+    return { answer: K ? `${where}"${picked.missing.name}" 폴더를 찾지 못해서 터미널을 열지 않았어요. 폴더 이름이나 경로(예: \`~/Downloads/${picked.missing.name}\`)를 확인해 주세요.`
+      : `No folder "${picked.missing.name}" ${where}was found, so no terminal was opened. Check the name or give the path (e.g. \`~/Downloads/${picked.missing.name}\`).`, verified: true, detail: "folder_missing" };
+  }
+  const cwd = picked.dir ?? (c.root || process.env.HOME || "/");
   // A background session of this project ("세션", "session", "로그"): attach to the newest one.
   let attach: string | undefined;
   if (/(세션|session|로그|log|tmux)/i.test(c.prompt) && c.root) {
@@ -739,8 +833,137 @@ async function openApp(c: SkillContext): Promise<SkillResult> {
     const s = (await listSessions(projectHash(c.root))).find((x) => !x.dead);
     if (s) attach = s.name;
   }
-  const ok = await A.openTerminal(cwd, attach ? `tmux -L openafm attach -t '${attach.replace(/'/g, "")}'` : undefined, ch);
-  const where = c.root ? `\`${cwd.replace(process.env.HOME ?? "~", "~")}\`` : (K ? "홈 폴더" : "your home folder");
+  const ok = await A.openTerminal(cwd, attach ? `tmux -L onbud attach -t '${attach.replace(/'/g, "")}'` : undefined, ch);
+  const where = cwd === process.env.HOME ? (K ? "홈 폴더(`~`)" : "your home folder (`~`)") : `\`${cwd.replace(process.env.HOME ?? "~", "~")}\``;
   return { answer: (ok ? (K ? `**${A.appName(ch.app)}**에서 ${where}를 열었어요${attach ? ` (백그라운드 세션 \`${attach}\`에 연결)` : ""} — ${why(ch.why)}.` : `Opened ${where} in **${A.appName(ch.app)}**${attach ? ` (attached to background session \`${attach}\`)` : ""}: ${why(ch.why)}.`) : (K ? "터미널을 열지 못했어요." : "Could not open the terminal.")) + hint,
     verified: ok, detail: `terminal ${A.appName(ch.app)} ${ch.why}${attach ? " attach" : ""}` };
+}
+
+// ---------------------------------------------------------------- any installed app
+async function launchApp(c: SkillContext): Promise<SkillResult> {
+  const A = await import("../context-builder/apps.ts");
+  const t = launchTarget(c.prompt)!;
+  const K = c.ko;
+  const r = await A.findInstalledApp(t.name);
+  if (!r.app && !r.candidates.length) {
+    // Not an app after all ("npm test 실행해줘"): the usual routing takes it, unless "앱"/"app" was said.
+    if (!t.explicit) return { answer: "", verified: false, detail: "no_app", declined: true };
+    return { answer: K ? `설치된 앱 중 "${t.name}"을(를) 찾지 못했어요. 앱 이름을 다르게 적어 보거나 Spotlight(⌘Space)에서 확인해 보세요.` : `No installed app matches "${t.name}". Try another name, or check in Spotlight (⌘Space).`, verified: true, detail: "not_found" };
+  }
+  if (!r.app) {
+    const list = r.candidates.map((a) => `- **${a.name}** (\`${a.path.replace(process.env.HOME ?? "~", "~")}\`)`).join("\n");
+    return { answer: K ? `"${t.name}"에 맞는 앱이 여러 개예요. 어떤 앱을 열까요?\n\n${list}` : `Several apps match "${t.name}". Which one?\n\n${list}`, verified: true, detail: `ambiguous ${r.candidates.length}` };
+  }
+  const ok = await A.launchApp(r.app);
+  const where = r.app.path.replace(process.env.HOME ?? "~", "~");
+  return { answer: ok ? (K ? `**${r.app.name}**을(를) 열었어요 (\`${where}\`).` : `Opened **${r.app.name}** (\`${where}\`).`) : (K ? `**${r.app.name}**을(를) 열지 못했어요.` : `Could not open **${r.app.name}**.`),
+    verified: ok, detail: `${r.app.name}` };
+}
+
+/** The folder a terminal request names, inside the home folder. Order: "this folder" (the project); an existing
+ *  path (~/x, /Users/…, Downloads/Orion — tried from the project and from home); folder names ("Orion 디렉토리",
+ *  "the Orion folder"), the most specific one searched inside the folders mentioned with it ("Downloads 폴더 안의
+ *  Orion 디렉토리" → ~/Downloads/Orion), then the project, home and Spotlight; known folders alone (home, Desktop,
+ *  Downloads, Documents). Several equally good folders → ask; a named folder that is not found → missing (the
+ *  caller says so instead of opening another folder). Nothing named → {}. */
+export async function terminalFolder(prompt: string, root?: string): Promise<{ dir?: string; ask?: string[]; missing?: { name: string; in?: string } }> {
+  const H = process.env.HOME ?? "";
+  const p = prompt.normalize("NFC");
+  const isDir = (x: string) => { try { return statSync(x).isDirectory(); } catch { return false; } };
+  const inHome = (x: string) => x === H || x.startsWith(H + "/");
+  if (/(이|현재|지금|여기|this|current)\s?(폴더|디렉토리|디렉터리|프로젝트|folder|directory|project)|\bhere\b/i.test(p) && root) return { dir: root };
+  const strip = (w: string) => w.replace(/^["'`(]+|["'`).,]+$/g, "").replace(/(에서|으로|로|를|을|에|의|은|는|안의|안에|속의|에있는)$/, "");
+  // 1. An explicit path, from the project and from home (deepest existing one).
+  for (const raw of p.split(/\s+/)) {
+    const w = strip(raw);
+    if (!w || !/[/~]/.test(w)) continue;
+    const tries = w.startsWith("~/") || w === "~" ? [join(H, w.slice(2))] : w.startsWith("/") ? [w] : [root ? join(root, w) : "", join(H, w)].filter(Boolean);
+    for (const abs of tries) if (inHome(abs) && isDir(abs)) return { dir: abs };
+  }
+  // 2. Known folders mentioned (bases) and folder names (targets), in the order they appear.
+  const KNOWN: [RegExp, string][] = [
+    [/(^|[^\p{L}])(홈|home)(?=$|[^\p{L}a-z]|[가-힣])/iu, H],
+    [/(바탕\s?화면|데스크톱|데스크탑|\bdesktop\b)/i, join(H, "Desktop")],
+    [/(다운로드|\bdownloads?\b)/i, join(H, "Downloads")],
+    [/(^|[\s(])(문서|\bdocuments\b)/i, join(H, "Documents")],
+  ];
+  const KNOWN_WORD = /^(홈|home|바탕화면|데스크톱|데스크탑|desktop|다운로드|downloads?|문서|documents|이|현재|지금|그|that|this|the|a|my|내)$/i;
+  const bases = KNOWN.filter(([re]) => re.test(p)).map(([, d]) => d).filter(isDir);
+  // A Korean particle may follow ("디렉토리를", "폴더에서"); only a Latin letter may not ("folders" is not "folder").
+  const names = [...p.matchAll(/([\p{L}\p{N}._-]+)\s?(?:폴더|디렉토리|디렉터리|folder|directory|dir)(?![a-z])/giu)].map((m) => m[1]).filter((n) => !KNOWN_WORD.test(n));
+  // Bare names without "폴더" ("Orion에서 터미널"): real folders right under a mentioned base, the project or home;
+  // a Latin/digit name may also be found further down (below), but is ignored if it is not found.
+  const loose: string[] = [];
+  for (const raw of p.split(/\s+/)) {
+    const w = strip(raw);
+    if (!w || KNOWN_WORD.test(w) || names.includes(w) || !/^[\p{L}\p{N}._-]{2,}$/u.test(w)) continue;
+    if ([...bases, root, H].some((b) => b && childDir(b, w))) names.push(w);
+    else if (/^[A-Za-z0-9._-]{2,}$/.test(w) && !BARE_STOP.test(w)) loose.push(w);
+  }
+  if (!names.length && loose.length) {
+    const found = [...new Set([...bases, root, H].filter(Boolean).flatMap((b) => findUnder(b!, loose.at(-1)!, 3)))].filter((x, _, a) => !a.some((y) => y !== x && x.startsWith(y + "/")));
+    if (found.length === 1) return { dir: found[0] };
+    if (found.length > 1) return { ask: found.slice(0, 5) };
+  }
+  if (names.length) {
+    const target = names.at(-1)!;
+    // Starting points: the known folders mentioned and the other named folders (resolved), else none (global).
+    let starts = [...bases];
+    for (const n of names.slice(0, -1)) {
+      const found = (starts.length ? starts : [root, H].filter(Boolean) as string[]).flatMap((b) => findUnder(b, n, 3));
+      if (found.length) starts = found;
+    }
+    const scoped = starts.flatMap((b) => findUnder(b, target, 4));
+    const pick = (xs: string[]) => { const top = shallowest(xs, target); return top.length === 1 ? { dir: top[0] } : top.length > 1 ? { ask: top.slice(0, 5) } : undefined; };
+    if (starts.length) return pick(scoped) ?? { missing: { name: target, in: starts[0] } };
+    // No folder mentioned with it: every same-named folder counts (not only the shallowest), so two Orion folders
+    // in different places are asked about instead of one being chosen silently.
+    const anywhere = (xs: string[]) => { const all = [...new Set(xs)].filter((x, _, a) => !a.some((y) => y !== x && x.startsWith(y + "/")));
+      const exact = all.filter((x) => basename(x) === target); const pool = exact.length ? exact : all;
+      return pool.length === 1 ? { dir: pool[0] } : pool.length > 1 ? { ask: pool.sort((a, b) => a.split("/").length - b.split("/").length).slice(0, 5) } : undefined; };
+    // The project first (its own "docs" wins), then the whole home folder.
+    for (const b of [root, H].filter(Boolean) as string[]) { const r = anywhere(findUnder(b, target, 3)); if (r) return r; }
+    const { findByName } = await import("../context-builder/finder.ts");
+    const hits = (await findByName([target], { kind: "folder", max: 20 })).filter((f) => f.dir && !f.hidden && basename(f.path).normalize("NFC").toLowerCase() === target.toLowerCase()).map((f) => f.path);
+    return anywhere(hits) ?? { missing: { name: target } };
+  }
+  if (bases.length) return { dir: bases.at(-1)! };
+  return {};
+}
+
+const BARE_STOP = /^(open|a|an|the|in|at|on|to|into|inside|under|here|there|terminal|iterm2?|shell|warp|ghostty|my|me|please|with|folder|directory|dir|new|window|tab)$/i;
+/** A direct child folder named `name` (case-insensitive), or undefined. */
+function childDir(base: string, name: string): string | undefined {
+  try { return readdirSync(base, { withFileTypes: true }).find((e) => e.isDirectory() && e.name.normalize("NFC").toLowerCase() === name.toLowerCase())?.name; } catch { return undefined; }
+}
+/** Folders named `name` (case-insensitive) under `base`, breadth-first to `depth`; hidden folders, node_modules and
+ *  Library skipped. */
+function findUnder(base: string, name: string, depth: number): string[] {
+  const out: string[] = [];
+  let level = [base];
+  for (let d = 0; d < depth && level.length && out.length < 20; d++) {
+    const next: string[] = [];
+    for (const dir of level) {
+      let entries: import("node:fs").Dirent[] = [];
+      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith(".") || /^(node_modules|Library|__pycache__)$/.test(e.name)) continue;
+        const full = join(dir, e.name);
+        if (e.name.normalize("NFC").toLowerCase() === name.toLowerCase()) out.push(full);
+        else if (next.length < 2000) next.push(full);
+      }
+    }
+    level = next;
+  }
+  return out;
+}
+/** The best matches: exact spelling before other case, shallow before deep, and a folder inside another match dropped
+ *  (~/Downloads/Orion, not also ~/Downloads/Orion/code/orion). */
+function shallowest(paths: string[], name: string): string[] {
+  const uniq = [...new Set(paths)].filter((x, _, all) => !all.some((y) => y !== x && x.startsWith(y + "/")));
+  const exact = uniq.filter((x) => basename(x) === name);
+  const pool = exact.length ? exact : uniq;
+  const depthOf = (x: string) => x.split("/").length;
+  const min = Math.min(...pool.map(depthOf));
+  return pool.filter((x) => depthOf(x) === min);
 }

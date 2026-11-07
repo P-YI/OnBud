@@ -20,22 +20,33 @@ import { classifyCommand, execCommand, renderResult } from "../context-builder/t
 import { RulesDecisionProvider, type Action, type DecisionProvider, type TaskType } from "../laya-router/decision.ts";
 import { DecimaClient, DecimaDecisionProvider, codeDifficulty } from "../laya-router/decima.ts";
 import { applyJob, compareJobs, discardJob, journalPath, jobDiffs, jobIdFrom, listJobs, loadJob, planJob, projectFiles, renameRequest, renderJob, runJob, saveJob, type Job } from "./jobs.ts";
-import { algorithmicRequest, newCodeRequest } from "./codegen.ts";
+import { algorithmic, newCodeRequest } from "./codegen.ts";
 import { frontierReachable } from "./frontier-opencode.ts";
 import { helpLanguage, helpTopic, isHelpRequest, renderHelp, unknownGitCommand } from "./help.ts";
 import { gateCommand, redact } from "../security/gate.ts";
 import { loadPolicy, systemFor, type Policy } from "../policy/policy.ts";
 import { NullTelemetry, projectHash, type OutcomeClass, type TelemetrySink } from "../telemetry/telemetry.ts";
 import { MemoryStore, renderMemory } from "../memory/memory.ts";
+import { contractMode, fitLanguage, languageOf, requestLanguage } from "../skills/language.ts";
+import { entriesOf, pickSkill, routerMode } from "../skills/router.ts";
+import { enabled } from "../skills/settings.ts";
+import { loadRegistry } from "../skills/registry.ts";
+
+// the pack that owns a local skill (for the per-skill switch)
+let packOf: Map<string, string> | undefined;
+const skillOf = (ls: string) => (packOf ??= new Map(loadRegistry().skills.flatMap((s) => Object.keys(s.entries ?? {}).map((e) => [e, s.id] as [string, string])))).get(ls) ?? "core";
 import { buildInventory, hasHangul, isInventoryRequest, renderInventory } from "./inventory.ts";
-import { findByName, isFindRequest, kindFromPrompt, nameTerms, renderFound } from "../context-builder/finder.ts";
+import { findByName, findFiles, findFrame, isFindRequest, kindFromPrompt, nameTerms, renderFound, type FindFrame } from "../context-builder/finder.ts";
 import { checkReferences, compileLatex, csvToLatexTable, findMainTex, fixUndefinedMacro, hasTeX, maskLatex, unmaskLatex, isLatexProject, renderLatexReport, trialCompileCommand } from "../context-builder/latex.ts";
 import { fetchPage, isWebRequest, kindFor, webSearch, type WebKind } from "../context-builder/websearch.ts";
 import { isLongRunning, listSessions, readSession, renderSessions, stopSession } from "../context-builder/sessions.ts";
 import { detectTestCommand, diffOf, proposeEdit, sha, trialEdit, renderTrial, type EditProposal, type TrialResult } from "./edit-loop.ts";
-import { detectLocalSkill, runLocalSkill } from "./local-skills.ts";
+import { detectLocalSkill, NO_ROOT, NOT_DELEGATED, WRITES_FILES, routedSkillApplies, runLocalSkill, type LocalSkill } from "./local-skills.ts";
 import { frameQuestion, ignoredLine, relevantLines, translationWords, typeMismatch, type Frame } from "./question-frame.ts";
 import { toEnglish } from "../context-builder/translate.ts";
+import { copilotFiller } from "../frontier/copilot-ls.ts";
+import { firstWriter } from "./code-skill.ts";
+import { easyContest } from "./code-difficulty.ts";
 import { housekeeping } from "../maintenance/housekeeping.ts";
 
 export interface FrontierProvider {
@@ -50,6 +61,7 @@ export interface Task {
   history?: string;          // short, already-redacted prior conversation (chat front-ends)
   frontEnd?: string;         // cli | opencode | test — for telemetry only
   onStep?: (step: Step) => void;   // live progress (the launcher shows each step while the request runs)
+  readOnly?: boolean;        // delegated by another agent (MCP afm_task): no apps opened, no local jobs started
 }
 
 export type Status = "answered_local" | "answered_frontier" | "escalation_required" | "ask_user" | "failed";
@@ -93,7 +105,7 @@ export function isJobRequest(prompt: string): boolean {
   if (/(방법|작성법|어떻게|하는 법|설명해|알려\s?줘|뭐야|무엇|뭔지|명령어|what is|what's|how (do|to|can|should)|explain|why|\?$)/i.test(p) && !/(만들어\s?줘|써\s?줘|넣어\s?줘|추가해\s?줘|작성해\s?줘|구현해\s?줘|추가해\s?줄래|만들어\s?줄래|please (create|write|add)|^(create|write|add|implement|insert)\b)/i.test(p)) return false;
   return /(새\s?(파일|모듈|스크립트)|파일을?\s?(새로\s?)?(만들|생성)|create (a )?(new )?(file|module|script)|new (file|module|script)|add (a )?(new )?(module|file))/i.test(p)
     || /((섹션|절|단락|문단|챕터|장|section|paragraph|chapter|related work|introduction|abstract|conclusion|서론|결론|관련 연구|초록).{0,20}(써|작성|추가|넣어|끼워|draft|write|add|insert))/i.test(p)
-    || /((함수|클래스|메서드|function|class|method).{0,20}(추가|넣어|만들어|작성|add|insert|create|write))/i.test(p)
+    || /((함수|클래스|메서드|function|class|method).{0,20}(추가|넣어|만들어|작성|구현|채워|완성|add|insert|create|write|implement|fill in|complete))/i.test(p)
     || /(여러 파일|multiple files|across (the )?files|기능(을)? (추가|구현)|implement (a |the )?feature|add (a |the )?feature)/i.test(p)
     || /((로컬|오프라인|afm)(로|으로|만으로)\s?(작업|진행|구현|만들|해))/i.test(p);
 }
@@ -102,13 +114,13 @@ export interface Budget { maxRounds: number; maxToolCalls: number; capsuleTokens
 export const DEFAULT_BUDGET: Budget = { maxRounds: 4, maxToolCalls: 6, capsuleTokens: 5500, afmTimeoutMs: 30_000 };
 
 const CONTROLLER_VERSION = "controller-v0.5";   // v0.5: local skills (dev assist, text tools); v0.4: v3 job routing, code_route logs
-const LOG_DIR = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "logs");
+const LOG_DIR = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "logs");
 
 function logEvent(e: Record<string, unknown>) {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
     // bench: set by the benchmark harnesses, so calibration from "real requests" can leave those runs out.
-    appendFileSync(join(LOG_DIR, "controller.jsonl"), JSON.stringify({ ts: new Date().toISOString(), controller: CONTROLLER_VERSION, ...(process.env.OPENAFM_BENCH ? { bench: true } : {}), ...e }) + "\n");
+    appendFileSync(join(LOG_DIR, "controller.jsonl"), JSON.stringify({ ts: new Date().toISOString(), controller: CONTROLLER_VERSION, ...(process.env.ONBUD_BENCH ? { bench: true } : {}), ...e }) + "\n");
   } catch { /* never let logging break a task */ }
 }
 
@@ -154,9 +166,9 @@ const ANSWER_SCHEMA = {
 /** Guided generation fills properties in order (Apple, WWDC25/26), so the schema itself can make AFM
  *  ground before answering: first copy short supporting quotes from EVIDENCE, then answer, then pick
  *  cited files from an enum of paths that really are in EVIDENCE (constrained decoding cannot invent one).
- *  OPENAFM_ANSWER_SCHEMA=v1 restores the plain schema for A/B checks. */
+ *  ONBUD_ANSWER_SCHEMA=v1 restores the plain schema for A/B checks. */
 export function answerSchema(evidencePaths: string[]) {
-  if (process.env.OPENAFM_ANSWER_SCHEMA === "v1") return ANSWER_SCHEMA;
+  if (process.env.ONBUD_ANSWER_SCHEMA === "v1") return ANSWER_SCHEMA;
   const props: Record<string, any> = {
     quotes: { type: "array", items: { type: "string" }, description: "1 to 3 short phrases copied exactly from EVIDENCE that the answer relies on; empty if EVIDENCE has nothing relevant" },
     answer: ANSWER_SCHEMA.properties.answer,
@@ -188,8 +200,21 @@ export function quotesGrounded(quotes: string[] | undefined, evidenceText: strin
 }
 
 const DOC_EXT = "pdf|docx?|pptx|xlsx|rtf|odt|key|pages|numbers|hwp|csv|tex|bib";
-const FILE_REF = new RegExp(`(?:^|[\\s\`'"(])((?:[\\w.-]+\\/)*[\\w.\\[\\]-]+\\.(?:py|ts|tsx|js|jsx|mjs|md|json|ya?ml|toml|txt|log|sh|swift|go|rs|java|kt|c|cc|cpp|h|hpp|rb|sql|ipynb|cfg|ini|${DOC_EXT}))(?::(\\d+))?(?![\\w])`, "gi");   // lookahead: "data.csv" must not match as "data.c"
+const FILE_REF = new RegExp(`(?:^|[\\s\`'"(])((?:[\\w.-]+\\/)*[\\w.\\[\\]-]+\\.(?:py|ts|tsx|js|jsx|mjs|md|json|ya?ml|toml|txt|log|sh|swift|go|rs|java|kt|c|cc|cpp|h|hpp|rb|sql|ipynb|cfg|ini|png|jpe?g|heic|heif|tiff?|gif|bmp|webp|html?|zip|${DOC_EXT}))(?::(\\d+))?(?![\\w])`, "gi");   // lookahead: "data.csv" must not match as "data.c"
 const IDENT = /`([^`\n]{2,60})`|\b([A-Za-z_][A-Za-z0-9]*_[A-Za-z0-9_]+|[a-z]+[A-Z][A-Za-z0-9]+|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]+)\b/g;
+
+/** Files named by an absolute or ~/ path that exist inside the home folder (no project folder open). Used only for
+ *  the convert skill, which writes new files next to its inputs; nothing else reads files outside a project. */
+export function homeFiles(prompt: string): { path: string }[] {
+  const home = homedir(), out: string[] = [];
+  const re = /(?:^|[\s`'"(“‘])((?:~\/|\/)[^\s`'"”’)]+?\.(?:png|jpe?g|heic|heif|tiff?|gif|bmp|webp|pdf|txt|rtf|html?|docx?|odt))(?=$|[\s`'"”’),.!?]|[가-힣])/gi;
+  for (const m of prompt.matchAll(re)) {
+    const abs = resolve(m[1].startsWith("~/") ? join(home, m[1].slice(2)) : m[1]).normalize("NFC");
+    if (!abs.startsWith(home + "/") || out.includes(abs)) continue;
+    try { if (statSync(abs).isFile()) out.push(abs); } catch { /* missing */ }
+  }
+  return out.map((path) => ({ path }));
+}
 
 export function mentionedFiles(prompt: string, root: string): { path: string; line?: number }[] {
   const out = new Map<string, number | undefined>();
@@ -197,10 +222,20 @@ export function mentionedFiles(prompt: string, root: string): { path: string; li
     if (existsSync(resolve(root, m[1]))) out.set(m[1], m[2] ? Number(m[2]) : undefined);
   }
   for (const p of spacedPaths(prompt, root)) if (![...out.keys()].some((k) => resolve(root, k) === resolve(root, p))) out.set(p, undefined);
+  // A name written without its extension that is exactly a top-level file's name ("the README" → README.md): only
+  // when no file was named otherwise, and only names of 4+ characters, so ordinary words rarely match.
+  if (!out.size) {
+    let top: string[] = [];
+    try { top = readdirSync(root).filter((n) => !n.startsWith(".") && /\.[A-Za-z0-9]{1,5}$/.test(n)); } catch { /* no folder */ }
+    for (const w of prompt.match(/[A-Za-z][A-Za-z0-9_-]{3,}/g) ?? []) {
+      const hit = top.filter((n) => n.replace(/\.[^.]+$/, "") === w || n.replace(/\.[^.]+$/, "").toLowerCase() === w.toLowerCase() && w === w.toUpperCase());
+      if (hit.length === 1 && statSync(resolve(root, hit[0])).isFile()) out.set(hit[0], undefined);
+    }
+  }
   return [...out].map(([path, line]) => ({ path, line }));
 }
 
-/** Paths written with spaces, Hangul, brackets or commas ("고대 대학원/약제급여목록_(2025.6.1.)(21,983).xlsx", absolute,
+/** Paths written with spaces, Hangul, brackets or commas ("연구 자료/약제급여목록_(2025.6.1.)(21,983).xlsx", absolute,
  *  ~/… or relative): for each document extension, the longest text before it that names an existing file inside the
  *  root. Files outside the root are not read. */
 export function spacedPaths(prompt: string, root: string): string[] {
@@ -225,7 +260,7 @@ export function spacedPaths(prompt: string, root: string): string[] {
 const NAME_STOP_KO = new Set(["자료", "최종", "파일", "문서", "수정", "사본", "복사", "초안", "완료", "공개용"]);
 const NAME_STOP = new Set(["the", "and", "for", "final", "accepted", "camera", "copy", "draft", "file", "document", "pdf", "doc", "docx", "pptx", "new", "old", "ver", "version", "v1", "v2", "v3"]);
 
-/** Documents named loosely ("Top Reviewer 문서" → "NeurIPS Top Reviewer.pdf"): file-name words found in
+/** Documents named loosely ("Award Letter 문서" → "Workshop Award Letter.pdf"): file-name words found in
  *  the request. Returns the single best match, or nothing when two files match equally well. */
 export function namedDocuments(prompt: string, root: string): { path: string }[] {
   const p = prompt.toLowerCase().normalize("NFC");
@@ -320,6 +355,18 @@ export function intentSeeds(prompt: string, files: { path: string }[], root?: st
   return seeds;
 }
 
+/** A shell command typed as the whole message: one line whose first word is an installed program (or a path to
+ *  one), with no Korean, no question mark and no conversational words ("make me a sandwich" is not a command). */
+const CMD_DIRS = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".opencode", "bin"), join(homedir(), ".local", "bin"), join(homedir(), ".cargo", "bin")];
+export function typedCommand(prompt: string): string | undefined {
+  const t = prompt.trim().replace(/^\$\s+/, "");
+  if (!t || t.includes("\n") || t.length > 200 || /[\uac00-\ud7a3?]/.test(t) || /\s(me|my|you|your|please|how|why|what|which|can|could|should|would|i|we|is|are)\b/i.test(` ${t}`)) return undefined;
+  const head = /^([A-Za-z0-9_.~/-]+)(\s|$)/.exec(t)?.[1];
+  if (!head || /^(open|say|yes|no|true|false|test|time|which|find|help|hi|hello|ok|okay)$/i.test(head)) return undefined;
+  const found = head.includes("/") ? existsSync(head.replace(/^~(?=\/)/, homedir())) : CMD_DIRS.some((d) => existsSync(join(d, head)));
+  return found ? t : undefined;
+}
+
 /** BFCL "missing parameter": an action on a file with no file named → ask instead of guessing a target. */
 export function missingTarget(prompt: string, files: { path: string }[]): string | undefined {
   if (files.length || identifiers(prompt).length || prompt.length > 80) return undefined;
@@ -331,6 +378,31 @@ export function missingTarget(prompt: string, files: { path: string }[]): string
   return ko
     ? `어떤 파일을 대상으로 할까요? 파일 경로${rename ? "와 새 이름" : ""}을 알려 주세요.`
     : `Which file do you mean? Please give the path${rename ? " and the new name" : ""}.`;
+}
+
+// "which file defines X", "where is X set", "어느 파일에서 X를 정의", "X는 어디서 설정돼"
+const LOCATE = /\b(which|what) (file|files|module|config)\b|\bwhere (is|are|do|does)\b.{0,60}\b(defined|set|configured|declared|implemented|stored)\b|(어느|어떤|무슨)\s?(파일|모듈|설정)|어디(에|서)\s?(정의|설정|선언|구현)/i;
+const STOPW = new Set(["which", "what", "where", "file", "files", "module", "defines", "define", "defined", "sets", "set", "configured", "declared", "implemented", "stored", "does", "the", "this", "that", "with", "from", "into", "have", "there", "about", "어느", "어떤", "파일", "정의", "설정", "어디", "있어", "하는", "되어", "돼"]);
+/** Content words of a request, longest first; a plural "s" dropped ("thresholds" → "threshold"). */
+export function contentTerms(prompt: string): string[] {
+  const words = (prompt.match(/[A-Za-z][A-Za-z0-9_-]{3,}|[가-힣]{2,}/g) ?? []).map((w) => w.toLowerCase()).filter((w) => !STOPW.has(w));
+  return [...new Set(words.map((w) => (/[a-z]{4,}s$/.test(w) && !/ss$/.test(w) ? w.slice(0, -1) : w)))].sort((a, b) => b.length - a.length);
+}
+/** Existing folders the request names by path ("policies/skills", "src"), inside the project. */
+export function namedDirs(prompt: string, root: string): string[] {
+  const out: string[] = [];
+  for (const m of prompt.matchAll(/(?:^|[\s`'"(])((?:[\w.-]+\/)*[\w.-]+)\/?(?=[\s`'").,?!]|$)/g)) {
+    const rel = m[1].replace(/\.$/, "");
+    if (!rel || rel.startsWith(".") || rel.length < 2) continue;
+    try { if (statSync(resolve(root, rel)).isDirectory() && resolve(root, rel).startsWith(resolve(root) + "/")) out.push(rel); } catch { /* not a folder */ }
+  }
+  return [...new Set(out)];
+}
+function listing(root: string, rel: string): string {
+  try {
+    return readdirSync(resolve(root, rel), { withFileTypes: true }).filter((e) => !e.name.startsWith(".")).slice(0, 60)
+      .map((e) => e.isDirectory() ? `${e.name}/` : `${e.name} (${humanSize(statSync(resolve(root, rel, e.name)).size)})`).join("\n");
+  } catch { return "(unreadable)"; }
 }
 
 /** Does the request need the open folder at all? (math, general knowledge → answer directly) */
@@ -378,7 +450,7 @@ export class Controller {
     this.hkDb = deps.db;
     this.afm = deps.afm;
     const rules = new RulesDecisionProvider(this.policy.rules);
-    const dc = { ...this.policy.decision.decima, ...(process.env.OPENAFM_DECIMA_MODE ? { mode: process.env.OPENAFM_DECIMA_MODE as any } : {}) };
+    const dc = { ...this.policy.decision.decima, ...(process.env.ONBUD_DECIMA_MODE ? { mode: process.env.ONBUD_DECIMA_MODE as any } : {}) };
     if (dc.mode !== "off") this.decimaClient = new DecimaClient(dc);
     this.decision = deps.decision ?? (dc.mode === "off" ? rules : new DecimaDecisionProvider(rules, this.decimaClient!, (meta, base, d) => {
       // Shadow/advice record: what the rules chose vs Decima's pick, for the rules-vs-Decima comparison.
@@ -389,7 +461,7 @@ export class Controller {
     }));
     this.frontier = deps.frontier;
     this.tel = deps.telemetry ?? new NullTelemetry();
-    this.memory = process.env.OPENAFM_MEMORY === "off" ? undefined : deps.memory;   // benchmark settings run without memory
+    this.memory = process.env.ONBUD_MEMORY === "off" ? undefined : deps.memory;   // benchmark settings run without memory
     this.db = deps.db;
     const a = this.policy.afm;
     this.budget = { ...DEFAULT_BUDGET, maxRounds: a.maxRounds, maxToolCalls: a.maxToolCalls, capsuleTokens: a.maxInputTokens, afmTimeoutMs: a.timeoutMs, ...deps.budget };
@@ -417,7 +489,25 @@ export class Controller {
     };
   }
 
+  /** One request: the routing below, then the reply-language contract (services/skills/language.ts) on whatever
+   *  answer came back. ONBUD_LANG_CONTRACT: on (default) translates, shadow logs a mismatch, off skips it. */
   async handle(task: Task): Promise<Outcome> {
+    const o = await this.route(task);
+    const mode = contractMode();
+    if (mode === "off" || !o.answer || (o.status !== "answered_local" && o.status !== "ask_user")) return o;
+    const { text: prompt } = redact(task.prompt);
+    const want = requestLanguage(prompt), got = languageOf(o.answer);
+    if (!got || got === want) return o;
+    logEvent({ taskId: o.taskId, event: "lang_mismatch", want, got, mode, reasonCode: o.reasonCode });
+    if (mode === "shadow") { o.steps.push({ kind: "lang_check", detail: `mismatch ${got}→${want} (shadow)` }); return o; }
+    const t0 = Date.now();
+    const fit = await fitLanguage(this.tracked(o.taskId), o.answer, want, this.budget.afmTimeoutMs);
+    o.steps.push({ kind: "lang_check", detail: `${got}→${want}: ${fit.why}`, ms: Date.now() - t0 });
+    if (fit.text) o.answer = fit.text;
+    return o;
+  }
+
+  private async route(task: Task): Promise<Outcome> {
     housekeeping(this.hkDb);   // returns at once unless a day has passed (state file); never throws
     const taskId = randomUUID();
     const t0 = Date.now();
@@ -430,7 +520,9 @@ export class Controller {
     if (secrets.length) steps.push({ kind: "redact", detail: secrets.join(",") });
     this.tel.startTask({ taskId, root, frontEnd: task.frontEnd ?? "unknown", complexityTokens: estimateTokens(prompt) });
     const pv = { policyVersion: this.policy.version, policyHash: this.policy.hash };
-    const ko = hasHangul(prompt);
+    // the request's own words decide (a Korean folder name in an English request is not Korean), with the
+    // contract on; otherwise any Hangul, as before
+    const ko = contractMode() === "on" ? requestLanguage(prompt) === "ko" : hasHangul(prompt);
 
     let route: Action = "LOCAL_AFM";
     let reasonCode = "";
@@ -446,6 +538,8 @@ export class Controller {
 
     // 1. Deterministic inspection
     let files = root ? mentionedFiles(prompt, root) : [];
+    // No project folder: a conversion of files named by absolute or ~/ paths still runs (and only that skill).
+    if (!root) { const hf = homeFiles(prompt); if (hf.length && detectLocalSkill(prompt, hf) === "convert") files = hf; }
     if (root && !files.length && /(문서|파일|논문|편지|서신|슬라이드|발표|보고서|원고|증명서|엑셀|시트|스프레드시트|목록|명단|파워포인트|프레젠테이션|document|file|paper|letter|slides|report|pdf|excel|sheet|spreadsheet|xlsx|csv|pptx?|presentation|deck)/i.test(prompt)) files = namedDocuments(prompt, root);
     const spans = [...prompt.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
     const dangerous = spans.find((s) => gateCommand(s, root ?? homedir()).verdict === "deny");
@@ -456,13 +550,20 @@ export class Controller {
     // Skills need the project folder, except the Mac health check, the security check (system and home parts only
     // when no project is open) and opening a terminal (in the home folder).
     const lsAny = !dangerous && health.ok ? detectLocalSkill(prompt, files) : undefined;
-    const ls = lsAny && (root || lsAny === "mac_health" || lsAny === "open_app" || lsAny === "security_check") ? lsAny : undefined;
-    if (ls) {
+    const ls = lsAny && (root || NO_ROOT.has(lsAny)) && !(task.readOnly && NOT_DELEGATED.has(lsAny)) ? lsAny : undefined;
+    if (task.readOnly && lsAny && NOT_DELEGATED.has(lsAny))
+      return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "read_only_app",
+        answer: "A delegated AFM task does not open apps or terminal windows; ask the user to do it, or do it with your own tools." });
+    // Delegated work (afm_task) never starts a local job: that changes a worktree and runs for minutes.
+    const noJob = () => finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "read_only_job",
+      answer: "This needs a multi-step change (a local job), which a delegated AFM task does not run. Do it with your own tools." });
+    // the skill run, shared by a rule match here and a router pick before the generic path (P3)
+    const runSkill = async (ls: LocalSkill, routed = false): Promise<Outcome | undefined> => {
       const before = { taskType, reasonCode, skill };
       taskType = ls === "docstrings" ? "small_edit" : "other";
       reasonCode = `local_${ls}`;
       skill = ls;
-      steps.push({ kind: "skill", detail: ls });   // shown live by the launcher before the skill runs
+      steps.push({ kind: "skill", detail: routed ? `${ls} (router)` : ls });   // shown live by the launcher before the skill runs
       const ts = Date.now();
       const r = await runLocalSkill(ls, { afm, root: root ?? "", prompt, files, ko, history: task.history, decima: this.decimaClient, timeoutMs: this.budget.afmTimeoutMs });
       steps.push({ kind: `skill_${ls}`, detail: r.detail, ms: Date.now() - ts });
@@ -475,7 +576,14 @@ export class Controller {
         if (r.pendingCommand) return finish({ status: "ask_user", outcomeClass: "asked_user", answer: r.answer, pendingCommand: r.pendingCommand });
         return finish({ status: "answered_local", outcomeClass: r.verified ? "local_verified" : "local_unverified", answer: r.answer });
       }
-    }
+      return undefined;
+    };
+    // a skill the user turned off (config/skills.json) answers how to turn it on, for rule stages too
+    const disabled = (id: string) => finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "skill_disabled",
+      answer: ko ? `이 기능(${id})은 꺼져 있어요. OnBud 설정 > Skills에서 켜거나 \`~/OnBud/config/skills.json\`을 바꿔 주세요.`
+        : `This skill (${id}) is turned off. Turn it on in OnBud Settings > Skills, or in \`~/OnBud/config/skills.json\`.` });
+    if (ls && !enabled(skillOf(ls))) return disabled(skillOf(ls));
+    if (ls) { const out = await runSkill(ls); if (out) return out; }
 
     // 1b. Document/folder overview: deterministic pipeline, AFM only describes single files.
     if (!dangerous && isInventoryRequest(prompt)) {
@@ -515,7 +623,8 @@ export class Controller {
     }
 
     // 1b'. Web search: AFM writes the query, the user approves it, then search + read top pages.
-    if (!dangerous && isWebRequest(prompt) && process.env.OPENAFM_WEB === "off") {
+    if (!dangerous && isWebRequest(prompt) && !enabled("web")) return disabled("web");
+    if (!dangerous && isWebRequest(prompt) && process.env.ONBUD_WEB === "off") {
       reasonCode = "web_disabled";
       return finish({ status: "escalation_required", outcomeClass: "escalation_pending", answer: ko ? "웹 검색이 꺼져 있어요(오프라인 설정)." : "Web search is turned off in this setting." });
     }
@@ -540,11 +649,15 @@ export class Controller {
 
     // 1c. Find files/folders by name across this Mac (Spotlight + hidden folders). Stays on-device:
     // never handed to Codex, not stored in memory; telemetry records only the count.
+    if (!dangerous && isFindRequest(prompt) && !enabled("files")) return disabled("files");
     if (!dangerous && isFindRequest(prompt)) {
       taskType = "other";
       reasonCode = "local_find_files";
       this.tel.decision({ taskId, provider: "rules", candidates: ["LOCAL_AFM", "ASK_USER"], action: "LOCAL_AFM", reasonCode, afmAvailable: health.ok, riskSignals: ["private_paths"] });
-      let terms = nameTerms(prompt);
+      // P2: a topic ("the paper about X") is searched in titles and text as well as in names; ONBUD_FIND_TOPIC=off
+      // keeps the name search only
+      const frame = process.env.ONBUD_FIND_TOPIC === "off" ? { names: nameTerms(prompt), content: false } as FindFrame : findFrame(prompt);
+      let terms = frame.names;
       if (!terms.length && health.ok) {
         const k = await afm.generate({ system: "Extract the file or folder name the user is looking for. Keep names exactly as written (any language); drop words like file, folder, find, where.",
           user: prompt, maxTokens: 80, timeoutMs: this.budget.afmTimeoutMs,
@@ -557,14 +670,24 @@ export class Controller {
           answer: ko ? "어떤 이름의 파일이나 폴더를 찾을까요? 이름 일부라도 알려 주세요." : "Which file or folder name should I look for? Part of the name is enough." });
       }
       const ts = Date.now();
-      const found = await findByName(terms, { project: root, kind: kindFromPrompt(prompt), max: 12 });
+      const found = frame.topic ? await findFiles({ ...frame, names: terms }, { project: root, kind: kindFromPrompt(prompt), max: 12 })
+        : await findByName(terms, { project: root, kind: kindFromPrompt(prompt), max: 12 });
       this.tel.toolCall({ taskId, tool: "find_by_name", ok: true, durationMs: Date.now() - ts, resultChars: found.length });
       steps.push({ kind: "find", detail: `${found.length} results`, ms: Date.now() - ts });
       return finish({ status: "answered_local", outcomeClass: "local_verified", answer: renderFound(found, terms, ko), revealPaths: found.map((f) => f.path) });
     }
 
+    // A LaTeX compile request in a folder with no LaTeX project: say so, instead of a generic answer that invented a
+    // main file (skill eval writing-latex-no-main).
+    if (root && !dangerous && /(latex|레이텍|\.tex\b)/i.test(prompt) && /(컴파일|빌드|compile|build|typeset)/i.test(prompt) && !isLatexProject(root)) {
+      reasonCode = "latex_no_main";
+      return finish({ status: "ask_user", outcomeClass: "asked_user", answer: ko
+        ? "이 폴더에는 LaTeX 문서(main .tex)가 없어요. 논문 폴더를 열고 다시 요청해 주세요."
+        : "There is no LaTeX document (main .tex) in this folder. Open the paper's folder and ask again." });
+    }
     // 1c'. LaTeX papers (offline): compile + log summary, reference checks, CSV → table; errors get an AFM fix
     // proposal that is tried by compiling a sandbox clone (edit→test loop with latexmk as the test).
+    if (!dangerous && root && isLatexProject(root) && !enabled("writing")) return disabled("writing");
     if (root && !dangerous && hasTeX() && isLatexProject(root)) {
       const texNamed = files.find((f) => /\.tex$/.test(f.path))?.path;
       const wantsCompile = /(컴파일|빌드|compile|build|pdf\s?(로|를)?\s?(만들|생성|뽑)|typeset)/i.test(prompt);
@@ -650,16 +773,20 @@ export class Controller {
           for (const t of targets.slice(0, 2)) parts.push(`**${t.label}** (${t.dead ? (ko ? "종료됨" : "exited") : (ko ? "실행 중" : "running")})\n\`\`\`\n${(await readSession(t.name, 40)) || "(no output)"}\n\`\`\``);
           return done(parts.join("\n\n"), "local_session_output");
         }
-        if (list) return done(renderSessions(mine, ko) + (ko ? "\n\n직접 보기: `tmux -L openafm attach -t <이름>`" : "\n\nWatch live: `tmux -L openafm attach -t <name>`"), "local_session_list");
+        if (list) return done(renderSessions(mine, ko) + (ko ? "\n\n직접 보기: `tmux -L onbud attach -t <이름>`" : "\n\nWatch live: `tmux -L onbud attach -t <name>`"), "local_session_list");
       }
     }
 
     // 1e. Explicit "run `command`": no model needed to choose it. Read-only runs now; anything else asks.
-    const runSpan = spans.length === 1 && /(실행|돌려|띄워|켜\s?줘|시작|run|start|launch|execute)/i.test(prompt) ? spans[0].trim() : undefined;
+    // A bare command typed into the chat ("opencode auth list") counts too: triage once read that as an error log.
+    const bare = !spans.length ? typedCommand(prompt) : undefined;
+    const runSpan = spans.length === 1 && /(실행|돌려|띄워|켜\s?줘|시작|run|start|launch|execute)/i.test(prompt) ? spans[0].trim() : bare;
     if (runSpan && /^[A-Za-z0-9_./~-]+(\s|$)/.test(runSpan) && (!dangerous || dangerous === spans[0])) {
-      if (!root) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "needs_project_folder",
+      // Without a project folder a typed command runs in the home folder (system commands such as `opencode auth list`).
+      const cmdRoot = root ?? (bare ? homedir() : undefined);
+      if (!cmdRoot) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "needs_project_folder",
         answer: ko ? "명령을 실행하려면 먼저 프로젝트 폴더를 열어 주세요." : "Open a project folder first to run commands." });
-      const cls = classifyCommand(runSpan, root);
+      const cls = classifyCommand(runSpan, cmdRoot);
       reasonCode = cls.mode === "blocked" ? "destructive_command" : `explicit_command_${cls.mode}`;
       if (cls.mode === "blocked") {
         const hint = cls.reasons.includes("network_listener")
@@ -668,7 +795,7 @@ export class Controller {
         return finish({ status: "ask_user", outcomeClass: "asked_user", answer: (ko ? "보안 게이트가 이 명령을 막았어요" : "The security gate blocks this command") + ` (${cls.reasons.join(", ")}).` + hint });
       }
       if (cls.mode === "auto") {
-        const r = await execCommand(runSpan, root);
+        const r = await execCommand(runSpan, cmdRoot);
         this.tel.toolCall({ taskId, tool: "run_command", ok: r.exitCode === 0, durationMs: r.ms, resultChars: r.output.length });
         return finish({ status: "answered_local", outcomeClass: "local_verified", answer: "```\n" + renderResult(runSpan, r) + "\n```" });
       }
@@ -713,19 +840,24 @@ export class Controller {
     // local job even when Codex is reachable (S1 used to send it to Codex as a multi-file change).
     if (root && !dangerous && health.ok && renameRequest(prompt) && hasWorkTarget(root, prompt)) {
       reasonCode = "local_rename";
-      return this.planLocalJob(prompt, root, finish, steps, ko);
+      return task.readOnly ? noJob() : this.planLocalJob(prompt, root, finish, steps, ko);
     }
+    if (!dangerous && root && isJobRequest(prompt) && hasWorkTarget(root, prompt) && !enabled("code")) return disabled("code");
     if (root && !dangerous && health.ok && isJobRequest(prompt) && hasWorkTarget(root, prompt) && !(files.length === 1 && /(고쳐|수정|fix)/i.test(prompt) && !/(새|create|new|섹션|section)/i.test(prompt))) {
-      // Evaluation 2026-10-30/31: AFM is weak at writing new algorithmic code and cannot check code without tests.
-      // When a frontier model is reachable, Codex (own branch) goes first for: Decima-hard requests, algorithmic
-      // requests, and new code in a project with no test command. "로컬" still runs the local job.
+      // When a frontier model is reachable, the code skill's triage (firstWriter) decides whether Copilot writes
+      // first (local job, checked by the tests and the gate) or Codex does (own branch). "로컬" still runs the local job.
       const T = this.policy.decision.decima.codeHardThreshold;
       let codeRoute: Job["codeRoute"];
       if (!/(로컬|오프라인|afm)(로|으로|만으로)/i.test(prompt) && !/\.(tex|bib)\b|섹션|section|논문/i.test(prompt) && (await frontierReachable())) {
         const d = this.decimaClient ? await codeDifficulty(this.decimaClient, prompt) : undefined;
-        codeRoute = { d, threshold: T, algorithmic: algorithmicRequest(prompt), newCode: newCodeRequest(prompt), tests: !!detectTestCommand(root) };
+        codeRoute = { d, threshold: T, algorithmic: algorithmic({ prompt }), newCode: newCodeRequest(prompt), tests: !!detectTestCommand(root) };
         steps.push({ kind: "decima_code", detail: d === undefined ? "n/a" : d.toFixed(2) });
-        const why = d !== undefined && d >= T ? "decima_code_hard" : codeRoute.algorithmic ? "algorithmic_code" : codeRoute.newCode && !codeRoute.tests ? "unverifiable_code" : undefined;
+        // who writes first: the code skill's triage (code-skill.ts firstWriter; copilot_mode in routing.yaml)
+        // contest-style requests: the difficulty classifier decides whether Copilot is worth trying first
+        const easy = codeRoute.algorithmic ? easyContest(prompt) : undefined;
+        const fw = await firstWriter({ d, algorithmic: codeRoute.algorithmic, newCode: codeRoute.newCode, checkable: codeRoute.tests, easy, copilot: async () => !!(await copilotFiller(root)), mode: this.policy.decision.copilotMode, hardAt: T });
+        if (fw.copilotTier) logEvent({ taskId, event: "copilot_tier", was: fw.reason, mode: this.policy.decision.copilotMode });
+        const why = fw.writer === "frontier" ? fw.reason : undefined;
         logEvent({ taskId, event: "code_route", ...codeRoute, ...(this.decimaClient?.served ? { decimaDigest: this.decimaClient.served.slice(0, 12) } : {}), route: why ? "FRONTIER_GPT" : "LOCAL_JOB", reasonCode: why ?? "local_job" });
         if (why) {
           reasonCode = why;
@@ -733,7 +865,22 @@ export class Controller {
           return this.escalate(taskId, { goal: prompt, constraints: [], evidence: [] }, prompt, root, task, steps, finish, reasonCode, "multi_file_change");
         }
       }
-      return this.planLocalJob(prompt, root, finish, steps, ko, undefined, codeRoute);
+      return task.readOnly ? noJob() : this.planLocalJob(prompt, root, finish, steps, ko, undefined, codeRoute);
+    }
+
+    // 1z. Skill router (P3): no rule took the request; the skills' example requests are offered to AFM, which picks
+    // one or none (any language). The pick must meet the skill's own conditions and the same folder/read-only
+    // rules as a rule match. ONBUD_ROUTER=shadow logs the pick only, off skips it.
+    // Only for requests that name no file (a named file goes to the document path, which answers questions about
+    // it; framework-eval C4/X7: the router turned "how many lines does data.csv have" into a CSV→JSON write).
+    // Skills that write files are never started by the router, only by their rules.
+    if (!dangerous && health.ok && routerMode() !== "off" && !files.length) {
+      const pick = await pickSkill(afm, prompt, entriesOf(), this.budget.afmTimeoutMs);
+      const id = pick.id as LocalSkill | undefined;
+      const usable = !!id && !WRITES_FILES.has(id) && routedSkillApplies(id, prompt, files) && (!!root || NO_ROOT.has(id)) && !(task.readOnly && NOT_DELEGATED.has(id)) && enabled(skillOf(id));
+      steps.push({ kind: "router", detail: `${pick.id ?? "none"}${pick.id && !usable ? " (does not apply)" : ""}${routerMode() === "shadow" ? " (shadow)" : ""}`, ms: pick.ms });
+      logEvent({ taskId, event: "router", pick: pick.id ?? "none", usable, mode: routerMode() });
+      if (usable && routerMode() === "fallback") { const out = await runSkill(id!, true); if (out) return out; }
     }
 
     // 2. AFM triage (schema-constrained; free-text sentinels proved unreliable)
@@ -804,7 +951,7 @@ export class Controller {
       // No frontier reachable (offline, or switched off): code/writing work becomes a local job instead.
       if (root && health.ok && /multi_file_change|small_edit|design|decima_frontier/.test(`${taskType} ${reasonCode}`) && /(수정|고쳐|바꿔|추가|구현|작성|만들|리팩터|써|fix|add|implement|create|write|refactor|change|update)/i.test(prompt) && !(await frontierReachable())) {
         steps.push({ kind: "offline", detail: "frontier unreachable → local job" });
-        return this.planLocalJob(prompt, root, finish, steps, ko, true);
+        return task.readOnly ? noJob() : this.planLocalJob(prompt, root, finish, steps, ko, true);
       }
       return this.escalate(taskId, capsule, prompt, root, task, steps, finish, reasonCode, taskType);
     }
@@ -881,8 +1028,8 @@ export class Controller {
         // Korean question: AFM can drop the key word while framing ("어느 학회 논문" → "what is the title"), and the
         // document is often English. The on-device translator's words can be added to the search words.
         // Off by default since the macOS 27.2 model update: on 15 document tasks × 2 it changed no answer and cost
-        // ~1 s (benchmark-notes §5i). OPENAFM_KO_QUESTION=on turns it back on.
-        if (doc.frame && ko && process.env.OPENAFM_KO_QUESTION === "on") {
+        // ~1 s (benchmark-notes §5i). ONBUD_KO_QUESTION=on turns it back on.
+        if (doc.frame && ko && process.env.ONBUD_KO_QUESTION === "on") {
           const en = await toEnglish(prompt);
           const add = en ? translationWords(en, files.map((f) => basename(f.path))) : [];
           doc.frame.search_words = [...new Set([...doc.frame.search_words, ...add])].slice(0, 10);
@@ -961,9 +1108,11 @@ export class Controller {
     }
 
     // Language check (AFM drifts to the evidence's language, e.g. English papers): translate if needed.
-    // Kept after the 27.2 check: Korean answers 2/28 → 8/28, no effect on correctness, ~1 s. OPENAFM_KO_ANSWER=off for A/B.
+    // Kept after the 27.2 check: Korean answers 2/28 → 8/28, no effect on correctness, ~1 s. ONBUD_KO_ANSWER=off for A/B.
     // (Asking for Korean in the answer prompt instead made P3 wrong again, 0/2, and gave 4/28 Korean answers.)
-    if (ko && !hasHangul(a.answer) && process.env.OPENAFM_KO_ANSWER !== "off") {
+    // With the reply-language contract on, its masked translation (paths, code and names kept) runs after every
+    // route instead; this older one translated paths ("policies/routing.yaml" → "정책/라우팅.yaml").
+    if (ko && !hasHangul(a.answer) && process.env.ONBUD_KO_ANSWER !== "off" && contractMode() !== "on") {
       const tr = await afm.generate({
         system: "Translate the text into natural Korean. Keep file names, code, numbers, names and technical terms exactly as written.",
         user: a.answer,
@@ -971,7 +1120,7 @@ export class Controller {
         maxTokens: 900, timeoutMs: this.budget.afmTimeoutMs,
       });
       steps.push({ kind: "translate", detail: tr.ok ? "ok" : `failed:${tr.failure}`, ms: tr.latencyMs });
-      // AFM transliterates names despite the instruction ("Finale Doshi-Velez" → "파이널 도시-베젤"); a
+      // AFM transliterates names despite the instruction ("Jordan Lee-Moreno" → "조던 리-모레노"); a
       // translation that loses a Latin-script name is worse than an English answer, so keep the original.
       const ko2 = tr.ok ? String((tr.json as any).korean ?? "") : "";
       const names = [...new Set(a.answer.match(/\b[A-Z][A-Za-z'’-]{2,}\b/g) ?? [])].filter((n) => !/^(The|This|That|These|It|In|On|At|For|And|But|If|When|File|Answer|Yes|No)$/.test(n));
@@ -992,7 +1141,7 @@ export class Controller {
     // Episodes only when grounded in files actually read and every cited path checked out; otherwise a
     // wrong answer would be recalled as "memory" next time and repeated (seen in testing).
     const readPaths = capsule.evidence.map((e) => /^(?:file|document) (.+)$/.exec(e.label)?.[1]).filter((x): x is string => !!x).slice(0, 4);
-    if (root && this.memory && readPaths.length && !bad.length && !a.assumptions.length) {
+    if (root && this.memory && !task.readOnly && readPaths.length && !bad.length && !a.assumptions.length) {   // delegated tasks read memory, never write it
       this.memory.remember(proj, { kind: "episode", sourceTask: taskId, importance: 0.4, text: `Q: ${prompt.slice(0, 160)}\nA: ${a.answer.slice(0, 280)}`, paths: readPaths });
     }
     return finish({ status: "answered_local", outcomeClass: bad.length ? "local_unverified" : "local_verified", answer, unverifiedPaths: bad.length ? bad : undefined,
@@ -1015,8 +1164,8 @@ export class Controller {
         const d = await readDocument(root, f.path, { maxChars: 4500, pdfPages: 3, db: this.db });
         // No PDF reader: say how to get one instead of answering from nothing (seen on a fresh install).
         if (d.error === PDFTEXT_MISSING) return `ask_user:${/[\uac00-\ud7a3]/.test(prompt)
-          ? `\`${f.path}\`를 읽을 PDF 도구(pdftext)가 없어요. OpenAFM 설정 > Backend > pdftext에서 **Install**을 누르거나, Command Line Tools를 설치하세요 (\`xcode-select --install\`). 그다음 다시 물어봐 주세요.`
-          : `There is no PDF reader (pdftext) to read \`${f.path}\`. Click **Install** in OpenAFM Settings > Backend > pdftext, or install the Command Line Tools (\`xcode-select --install\`), then ask again.`}`;
+          ? `\`${f.path}\`를 읽을 PDF 도구(pdftext)가 없어요. OnBud 설정 > Backend > pdftext에서 **Install**을 누르거나, Command Line Tools를 설치하세요 (\`xcode-select --install\`). 그다음 다시 물어봐 주세요.`
+          : `There is no PDF reader (pdftext) to read \`${f.path}\`. Click **Install** in OnBud Settings > Backend > pdftext, or install the Command Line Tools (\`xcode-select --install\`), then ask again.`}`;
         const letter = d.error ? undefined : letterFacts(d.text);
         if (letter) capsule.evidence.push({ label: `letter structure of ${f.path}`, body: letter });
         capsule.evidence.push({ label: `document ${f.path}`, body: d.error ? d.error : `${d.spotlightKind ?? d.kind}${d.pages ? `, ${d.pages} pages` : ""}${d.truncated ? ", excerpt" : ""}\n${d.text}` });
@@ -1038,6 +1187,25 @@ export class Controller {
     for (const id of identifiers(prompt).slice(0, 2)) {
       const hits = await searchCode(root, id, { max: 8 });
       if (hits.length) capsule.evidence.push({ label: `search "${id}"`, body: hits.map((h) => `${h.path}:${h.line}: ${h.text}`).join("\n") });
+    }
+    // A folder the request names ("the skills in policies/skills"): its listing, so the answer is read, not guessed.
+    for (const dir of namedDirs(prompt, root).slice(0, 2)) capsule.evidence.push({ label: `listing of ${dir}/`, body: listing(root, dir) });
+    // "Which file defines/sets X?", "X는 어디서 정의돼?": the request's content words searched across the project;
+    // files matching more of them come first (AFM had answered a file that does not exist).
+    if (!files.length && LOCATE.test(prompt)) {
+      // a Korean question about English code: its English words (Apple's on-device translator), else its own
+      const en = /[가-힣]/.test(prompt) ? await toEnglish(prompt).catch(() => undefined) : undefined;
+      const terms = contentTerms(en ?? prompt).slice(0, 4);
+      const byFile = new Map<string, { n: Set<string>; lines: string[] }>();
+      for (const t of terms) for (const h of await searchCode(root, `[${t[0].toUpperCase()}${t[0]}]${t.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, { max: 30, regex: true })) {
+        const e = byFile.get(h.path) ?? { n: new Set(), lines: [] };
+        e.n.add(t); if (e.lines.length < 4) e.lines.push(`${h.path}:${h.line}: ${h.text.trim().slice(0, 160)}`); byFile.set(h.path, e);
+      }
+      // more distinct terms first; a term in the file's own path counts too ("routing" → routing.yaml)
+      const score = (p: string, e: { n: Set<string> }) => e.n.size + terms.filter((t) => p.toLowerCase().includes(t)).length;
+      const ranked = [...byFile].sort((a, b) => score(b[0], b[1]) - score(a[0], a[1]) || b[1].lines.length - a[1].lines.length).slice(0, 4);
+      if (ranked.length) capsule.evidence.push({ label: `files that mention ${terms.join(", ")} (most terms first)`, body: ranked.map(([, e]) => e.lines.join("\n")).join("\n") });
+      steps.push({ kind: "locate", detail: `${terms.join(",")} → ${ranked.length} files` });
     }
     if (taskType === "diff_summary") capsule.evidence.push({ label: "git diff", body: await gitDiff(root) });
     if (/(log|output|server|session|running|crash|로그|출력|서버|세션|실행 중|상태|에러|오류)/i.test(prompt)) {
@@ -1206,7 +1374,9 @@ export class Controller {
     const job = loadJob(id);
     if (!job) return `job ${id} not found`;
     const ko = hasHangul(job.request);
-    const done = await runJob(this.afm, job, { decima: this.decimaClient, onProgress });
+    // Copilot's inline completion as the middle tier for code steps AFM cannot finish (unlimited on every plan).
+    const copilot = await copilotFiller(job.root);
+    const done = await runJob(this.afm, job, { decima: this.decimaClient, onProgress, copilot });
     // Shadow record for calibrating decima_code_hard_threshold on real requests (tools/calibrate-code-threshold.ts).
     if (done.codeRoute) logEvent({ event: "job_outcome", jobId: id, status: done.status, ...done.codeRoute });
     const head = done.status === "done" ? (ko ? `✅ 로컬 작업 \`${id}\` 완료` : `✅ Local job \`${id}\` finished`) : (ko ? `⚠ 로컬 작업 \`${id}\`이 ${done.steps.find((s) => s.status === "failed")?.n}단계에서 멈췄어요` : `⚠ Local job \`${id}\` stopped at step ${done.steps.find((s) => s.status === "failed")?.n}`);
@@ -1309,7 +1479,7 @@ export class Controller {
     steps.push({ kind: "escalate", detail: reasonCode });
     logEvent({ taskId, event: "escalate", reasonCode, frontier: !!(task.allowFrontier && this.frontier) });
     // Reflexion-style lesson: remembered and shown on similar later tasks.
-    if (root && this.memory && reasonCode.startsWith("afm_")) {
+    if (root && this.memory && !task.readOnly && reasonCode.startsWith("afm_")) {
       this.memory.remember(projectHash(root), { kind: "lesson", sourceTask: taskId, importance: 0.7,
         text: `Local AFM could not finish a ${taskType} task ("${prompt.slice(0, 100)}"): ${reasonCode}. Read the relevant files first or hand off to codex.`,
         keywords: [taskType, reasonCode] });

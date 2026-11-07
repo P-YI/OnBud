@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const home = mkdtempSync(join(tmpdir(), "openafm-home-"));
-process.env.OPENAFM_HOME = home;
+const home = mkdtempSync(join(tmpdir(), "onbud-home-"));
+process.env.ONBUD_HOME = home;
 mkdirSync(join(home, "config"), { recursive: true });
 writeFileSync(join(home, "config", "apfel.token"), "t".repeat(64));
 const { needsEdits, render, isYes } = await import("../bin/afm-agent-server.ts");

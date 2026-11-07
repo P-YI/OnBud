@@ -1,0 +1,2 @@
+{"id": "server-no-host-ko", "act": true, "q": "GPU 서버에서 train.py 돌려줘", "root": "repo", "expect": {"skill": "server", "lang": "ko"}}
+{"id": "server-status-en", "act": true, "q": "How is the training on the GPU server going?", "root": "none", "expect": {"skill": "server"}}

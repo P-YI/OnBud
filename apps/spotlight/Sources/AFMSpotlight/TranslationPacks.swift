@@ -1,6 +1,6 @@
 // Translation languages plugin: which of Apple's on-device translation languages are downloaded (Translation
 // framework), a Download button per language (macOS shows its own download sheet), and the controller's
-// translator binary (tools/translate/Translate.swift → ~/OpenAFM/runtime/bin/afm-translate, built on first use).
+// translator binary (tools/translate/Translate.swift → ~/OnBud/runtime/bin/afm-translate, built on first use).
 import AppKit
 import SpotlightCore
 import SwiftUI
@@ -21,7 +21,7 @@ final class TranslationModel: ObservableObject {
     @Published var message: String?
     @Published var download: TranslationSession.Configuration?
 
-    let paths = OpenAFMPaths()
+    let paths = OnBudPaths()
     var binary: URL { paths.home.appendingPathComponent("runtime/bin/afm-translate") }
     var source: URL { paths.repo.appendingPathComponent("tools/translate/Translate.swift") }
     var built: Bool { FileManager.default.isExecutableFile(atPath: binary.path) }

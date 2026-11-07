@@ -1,0 +1,15 @@
+{"id": "core-en-answer-en", "family": "readme-summary", "q": "Summarize the README in two sentences.", "root": "repo", "expect": {"answer": "OnBud"}}
+{"id": "core-ko-answer-ko", "family": "readme-summary", "q": "README를 두 문장으로 요약해줘", "root": "repo", "expect": {"answer": "OnBud"}}
+{"id": "core-en-after-ko-history", "family": "reply-language", "q": "Explain what README.md is about.", "root": "repo", "history": [["이 프로젝트 구조 알려줘", "이 프로젝트는 services, bin, tests 폴더로 구성되어 있어요."]], "expect": {"answer": "OnBud"}}
+{"id": "core-lang-en-services", "family": "reply-language", "q": "Explain in two sentences what the services folder contains.", "root": "repo", "expect": {"answer": "controller|context|skill"}}
+{"id": "core-lang-ko-services", "family": "reply-language", "q": "services 폴더에 뭐가 들어 있는지 두 문장으로 설명해줘", "root": "repo", "expect": {"answer": "controller|context|skill|컨트롤러"}}
+{"id": "core-lang-en-with-hangul", "family": "reply-language", "q": "What does the Korean word 안녕하세요 mean in English?", "root": "none", "expect": {"answer": "hello|greeting"}}
+{"id": "core-not-routed-howto", "family": "router-negative", "q": "How do I write a good commit message?", "root": "repo", "expect": {"reasonCode": "^(?!local_commit_message)"}}
+{"id": "core-not-routed-project", "family": "router-negative", "q": "What does this project do?", "root": "repo", "expect": {"notAnswer": "docstring"}}
+{"id": "core-lang-ja-services", "family": "reply-language-multi", "q": "services フォルダーに何が入っているか、2文で説明してください。", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "ja", "langStrict": true}}
+{"id": "core-lang-zh-services", "family": "reply-language-multi", "q": "请用两句话说明 services 文件夹里有什么。", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "zh", "langStrict": true}}
+{"id": "core-lang-es-services", "family": "reply-language-multi", "q": "Explica en dos frases qué contiene la carpeta services.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "es", "langStrict": true}}
+{"id": "core-lang-fr-services", "family": "reply-language-multi", "q": "Explique en deux phrases ce que contient le dossier services.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "fr", "langStrict": true}}
+{"id": "core-lang-de-services", "family": "reply-language-multi", "q": "Erkläre in zwei Sätzen, was der Ordner services enthält.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "de", "langStrict": true}}
+{"id": "core-lang-pt-services", "family": "reply-language-multi", "q": "Explique em duas frases o que a pasta services contém.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "pt", "langStrict": true}}
+{"id": "core-lang-it-services", "family": "reply-language-multi", "q": "Spiega in due frasi cosa contiene la cartella services.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "it", "langStrict": true}}

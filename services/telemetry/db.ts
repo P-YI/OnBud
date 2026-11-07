@@ -1,14 +1,17 @@
 // Local SQLite (WAL) for Phase 3 telemetry, agentic memory and the document-text cache.
-// Lives in ~/OpenAFM/runtime/db (outside git). Metadata and short redacted summaries only:
+// Lives in ~/OnBud/runtime/db (outside git). Metadata and short redacted summaries only:
 // no raw prompts, full code, command output or credentials.
 // Needs `node --experimental-sqlite` on Node 22.
 
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, chmodSync } from "node:fs";
+import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const DEFAULT_DB = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "db", "openafm.sqlite");
+const DB_DIR = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "db");
+/** onbud.sqlite; a v0.1.0 installation (then called OpenAFM) keeps its openafm.sqlite until a new one exists. */
+export const DEFAULT_DB = !existsSync(join(DB_DIR, "onbud.sqlite")) && existsSync(join(DB_DIR, "openafm.sqlite"))
+  ? join(DB_DIR, "openafm.sqlite") : join(DB_DIR, "onbud.sqlite");
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (

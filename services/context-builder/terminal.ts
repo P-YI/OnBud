@@ -45,7 +45,8 @@ export function execCommand(command: string, root: string, opts: { timeoutMs?: n
     const child = spawn("/bin/sh", ["-c", command], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", HOME: homedir(), LANG: "en_US.UTF-8", TERM: "dumb", NO_COLOR: "1", GIT_PAGER: "cat", PAGER: "cat" },
+      // ~/.opencode/bin and ~/.local/bin: user-installed CLIs (opencode, uv) the user may type into the chat.
+      env: { PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${homedir()}/.opencode/bin:${homedir()}/.local/bin`, HOME: homedir(), LANG: "en_US.UTF-8", TERM: "dumb", NO_COLOR: "1", GIT_PAGER: "cat", PAGER: "cat" },
     });
     let out = "";
     let truncated = false;

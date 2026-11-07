@@ -1,5 +1,5 @@
 // What the chat widget shows (Widget/ChatWidget.swift): the last question and answer, written by the app to
-// ~/Library/Application Support/OpenAFM/widget/snapshot.json (owner-only). The widget runs sandboxed and may
+// ~/Library/Application Support/OnBud/widget/snapshot.json (owner-only). The widget runs sandboxed and may
 // read only that folder (a read-only home-relative exception in its entitlements). This file is compiled into
 // both the app (SpotlightCore) and the widget extension.
 import Foundation
@@ -14,7 +14,7 @@ public struct WidgetSnapshot: Codable, Sendable, Equatable {
         self.question = question; self.answer = answer; self.folder = folder; self.running = running; self.date = date
     }
 
-    public static let kind = "dev.openafm.chat"
+    public static let kind = "dev.onbud.chat"
     public static let maxAnswer = 600
 
     /** The real home folder (inside the widget's sandbox, NSHomeDirectory() is its container). */
@@ -23,7 +23,7 @@ public struct WidgetSnapshot: Codable, Sendable, Equatable {
         return NSHomeDirectory()
     }
     public static var file: URL {
-        URL(fileURLWithPath: realHome).appendingPathComponent("Library/Application Support/OpenAFM/widget/snapshot.json")
+        URL(fileURLWithPath: realHome).appendingPathComponent("Library/Application Support/OnBud/widget/snapshot.json")
     }
 
     public static func load(from file: URL = file) -> WidgetSnapshot? {

@@ -1,0 +1,17 @@
+{
+ "created": "2026-11-08",
+ "seed": 20261108,
+ "note": "Fresh held-out set (2026-11-08), drawn before any v0.2.0 r4 change was measured; never used to tune or analyse. Problems not in any earlier subset. Seed 20261108.",
+ "benchmark": "bcb-hard",
+ "ids": [
+  "BigCodeBench/15",
+  "BigCodeBench/147",
+  "BigCodeBench/287",
+  "BigCodeBench/313",
+  "BigCodeBench/826",
+  "BigCodeBench/857",
+  "BigCodeBench/988",
+  "BigCodeBench/999",
+  "BigCodeBench/1039"
+ ]
+}

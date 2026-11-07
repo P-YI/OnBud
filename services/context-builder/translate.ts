@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const SRC = new URL("../../tools/translate/Translate.swift", import.meta.url).pathname;
-const BIN = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "bin", "afm-translate");
+const BIN = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "bin", "afm-translate");
 let broken = false;
 
 const exec = (cmd: string, args: string[], timeout: number) => new Promise<{ code: number; out: string }>((res) =>

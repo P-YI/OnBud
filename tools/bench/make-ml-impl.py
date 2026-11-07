@@ -1,4 +1,4 @@
-# ML implementation tasks (2026-11-01): 15 HumanEval-style problems written for OpenAFM (no third-party data),
+# ML implementation tasks (2026-11-01): 15 HumanEval-style problems written for OnBud (no third-party data),
 # pure Python, numeric checks with tolerances. Each reference solution must pass its tests and doctests before
 # the file is written.  usage: python3 -I tools/bench/make-ml-impl.py <python3.10+> tools/bench/ml-impl.jsonl
 import json, sys, subprocess, textwrap

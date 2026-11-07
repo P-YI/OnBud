@@ -1,8 +1,9 @@
 // Icon assets (run by `make icon`):
-//   AppIcon-1024.png   app logo (OpenAFM_Icon2.2), 20% less saturated and 7% darker, specks removed,
-//                      on a white rounded square (macOS icon grid), filling most of it
-//   PanelIcon.png      the same logo without background, for the panel's input row
-//   MenuBar.png/@2x    black silhouette of the menu-bar logo (OpenAFM_Icon3), cropped to its content
+//   AppIcon-1024.png   app logo (OnBud_Icon3), specks removed, in its own colors on a light-blue rounded square
+//                      (macOS icon grid), filling most of it
+//   PanelIcon.png      the same logo without background, cropped to its content, for the panel's input row
+//   MenuBar.png/@2x    black silhouette of the menu-bar logo (OnBud_Icon) with its dark outlines and prompt
+//                      cut out, so the bud and the >_ still read at 18 pt; cropped to its content
 //   MenuBarColor.png/@2x  the same logo in its own colors, same crop (shown while AFM works)
 // usage: swift scripts/make-icons.swift <app-logo.png> <menubar-logo.png> <out-dir>
 import AppKit
@@ -64,30 +65,50 @@ func contentBounds(_ image: CIImage) -> CGRect {
                   width: CGFloat(maxX - minX + 1), height: CGFloat(maxY - minY + 1))
 }
 
-// App logo: cleaned, 20% less saturated, 7% darker.
-let logo = CIFilter(name: "CIColorControls", parameters: [
-    kCIInputImageKey: clean(appSrc), kCIInputSaturationKey: 0.8, kCIInputBrightnessKey: -0.07, kCIInputContrastKey: 1.0,
-])!.outputImage!.cropped(to: appSrc.extent)
+// App logo: cleaned, colors unchanged.
+let logo = clean(appSrc)
 
 let canvas = 1024
 let icon = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8, bytesPerRow: 0, space: srgb,
                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
 let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
 icon.setShadow(offset: CGSize(width: 0, height: -6), blur: 18, color: CGColor(gray: 0, alpha: 0.22))
+// Tile color: ICON_BG="#RRGGBB" (flat) or "#RRGGBB,#RRGGBB" (top to bottom gradient). Default: light blue, so the
+// logo's dark outline stays crisp and the tile still stands apart from white windows.
+func hex(_ h: String) -> CGColor {
+    let v = Int(h.trimmingCharacters(in: CharacterSet(charactersIn: "# ")), radix: 16) ?? 0xFFFFFF
+    return CGColor(srgbRed: CGFloat(v >> 16 & 255) / 255, green: CGFloat(v >> 8 & 255) / 255, blue: CGFloat(v & 255) / 255, alpha: 1)
+}
+let bg = (ProcessInfo.processInfo.environment["ICON_BG"] ?? "#EAF4FD,#D4E8F8").split(separator: ",").map { hex(String($0)) }
 icon.addPath(CGPath(roundedRect: tile, cornerWidth: 185, cornerHeight: 185, transform: nil))
-icon.setFillColor(CGColor(gray: 1, alpha: 1))
+icon.setFillColor(bg[0])
 icon.fillPath()
 icon.setShadow(offset: .zero, blur: 0, color: nil)
-// The logo fills ~89% of the tile (was 80%), cropped to its content so transparent margins don't shrink it.
-let side = 730
+if bg.count > 1, let g = CGGradient(colorsSpace: srgb, colors: [bg[0], bg[1]] as CFArray, locations: [0, 1]) {
+    icon.saveGState()
+    icon.addPath(CGPath(roundedRect: tile, cornerWidth: 185, cornerHeight: 185, transform: nil)); icon.clip()
+    icon.drawLinearGradient(g, start: CGPoint(x: 0, y: tile.maxY), end: CGPoint(x: 0, y: tile.minY), options: [])
+    icon.restoreGState()
+}
+// The logo fills ~84% of the tile, cropped to its content so transparent margins don't shrink it.
+let side = 690
 icon.draw(render(logo.cropped(to: contentBounds(logo)), side, side), in: CGRect(x: (canvas - side) / 2, y: (canvas - side) / 2, width: side, height: side))
 write(icon.makeImage()!, "AppIcon-1024.png")
-write(render(logo, 128, 128), "PanelIcon.png")
+write(render(logo.cropped(to: contentBounds(logo)), 128, 128), "PanelIcon.png")   // cropped: no transparent margin
 
-// Menu bar: black silhouette of the second logo, cropped to its content.
+// Menu bar: black silhouette of the second logo minus its dark strokes (luminance < ~0.3), cropped to its content.
 let bar = clean(barSrc)
+let lightMask = CIFilter(name: "CIColorMatrix", parameters: [
+    kCIInputImageKey: bar.unpremultiplyingAlpha(),
+    "inputRVector": CIVector(x: 1.5, y: 2.9, z: 0.6, w: 0), "inputGVector": CIVector(x: 1.5, y: 2.9, z: 0.6, w: 0),
+    "inputBVector": CIVector(x: 1.5, y: 2.9, z: 0.6, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+    "inputBiasVector": CIVector(x: -1.5, y: -1.5, z: -1.5, w: 1),
+])!.outputImage!.applyingFilter("CIColorClamp").cropped(to: bar.extent)
+let cut = CIFilter(name: "CIBlendWithMask", parameters: [
+    kCIInputImageKey: bar, kCIInputBackgroundImageKey: CIImage(color: .clear).cropped(to: bar.extent), kCIInputMaskImageKey: lightMask,
+])!.outputImage!.cropped(to: bar.extent)
 let black = CIFilter(name: "CIColorMatrix", parameters: [
-    kCIInputImageKey: bar,
+    kCIInputImageKey: cut,
     "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
     "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
 ])!.outputImage!.cropped(to: contentBounds(bar))

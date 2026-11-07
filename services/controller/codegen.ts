@@ -9,6 +9,10 @@
 //   5. diagnosis-first repair with the failing example
 import type { AFMProvider } from "../afm-adapter/provider.ts";
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fill, type Filler } from "../frontier/copilot-ls.ts";
+
 export interface Run { ok: boolean; out: string }
 export interface CodeTask {
   prompt: string;
@@ -54,7 +58,7 @@ export function assemble(task: CodeTask, j: any): string {
   return strip(`${(j.imports ?? []).join("\n")}\n${lines.join("\n")}\n`);
 }
 
-async function generate(afm: AFMProvider, task: CodeTask, i: number, extra = "", plan = true): Promise<{ code: string; ok: boolean }> {
+export async function generate(afm: AFMProvider, task: CodeTask, i: number, extra = "", plan = true): Promise<{ code: string; ok: boolean }> {
   const how = task.kind === "function" ? "Complete the function: write its body (and helpers inside it if needed)." : "Write a complete Python program for the task.";
   const r = await afm.generate({
     system: `You are an expert Python programmer. ${how} First plan the approach and edge cases, then write the code. ${VARIANTS[i % VARIANTS.length]}`,
@@ -65,7 +69,7 @@ async function generate(afm: AFMProvider, task: CodeTask, i: number, extra = "",
 }
 
 /** Compile + load check (no tests): catches syntax/indent/import/name slips. */
-async function formatGate(task: CodeTask, code: string): Promise<Run> {
+export async function formatGate(task: CodeTask, code: string): Promise<Run> {
   const probe = task.kind === "function" && task.entry ? `${code}\n\n_ = ${task.entry}\n` : `import ast\nast.parse(${JSON.stringify(code)})\n`;
   return task.exec(probe);
 }
@@ -146,16 +150,12 @@ export async function solveLocal(afm: AFMProvider, task: CodeTask, o: LocalOptio
 // tasks without examples, and tasks Decima rates hard (local 2/18) it only added 60-90 s. v3 makes one attempt
 // first and adds candidates only where they helped.
 
-/** Contest-style algorithm problems (stdin programs, LeetCode classes, explicit constraints): measured AFM limit. */
-export function algorithmic(task: CodeTask): boolean {
-  return task.kind === "program" || /Solution\(\)/.test(task.invoke ?? "") || /^\s*Constraints?\s*:?\s*$/im.test(task.prompt);
-}
-
-/** Can a local answer be checked against the task's own examples? */
-/** Job requests (free text) that ask for new algorithmic code: the local model's measured weak spot
- *  (LCB 0/20 medium and hard). Mechanical edits, documents and LaTeX do not match. */
-export function algorithmicRequest(prompt: string): boolean {
-  return /(알고리즘|algorithm|시간\s?복잡도|time complexity|O\([^)]*n[^)]*\)|동적\s?계획|dynamic programming|\bDP\b|최단\s?경로|shortest path|그래프 (탐색|알고리즘)|graph (search|traversal)|이진\s?탐색|binary search|백트래킹|backtracking|코딩\s?테스트|leetcode|백준|competitive programming|constraints?:)/i.test(prompt);
+/** Contest-style or algorithmic code: one test for a benchmark task (stdin program, LeetCode class, a
+ *  "Constraints:" section) and for a free-text request ("shortest path", "O(n log n)", "백준"). The local
+ *  model's measured weak spot (LCB 0/20 medium and hard), and where passing the examples is weakest evidence. */
+const ALGO_WORDS = /(알고리즘|algorithm|시간\s?복잡도|time complexity|O\([^)]*n[^)]*\)|동적\s?계획|dynamic programming|\bDP\b|최단\s?경로|shortest path|그래프 (탐색|알고리즘)|graph (search|traversal)|이진\s?탐색|binary search|백트래킹|backtracking|코딩\s?테스트|leetcode|백준|competitive programming|constraints?:)/i;
+export function algorithmic(task: { prompt: string; kind?: CodeTask["kind"]; invoke?: string }): boolean {
+  return task.kind === "program" || /Solution\(\)/.test(task.invoke ?? "") || /^\s*Constraints?\s*:?\s*$/im.test(task.prompt) || ALGO_WORDS.test(task.prompt);
 }
 
 /** New code requested from a description (a function, class or module to write), as opposed to edits. */
@@ -168,24 +168,73 @@ export async function verifiable(task: CodeTask, code: string): Promise<boolean 
   return ex ? (await ex).ok : undefined;
 }
 
-export interface AdaptiveResult extends LocalResult { stage: "first" | "extra"; genMs?: number; checkMs?: number }
-
-/** One attempt (format gate + examples); only when it fails the examples and `extra` is allowed, more candidates
- *  and one repair (the v2 pipeline, seeded with the first attempt).
- *  fast (online, a frontier fallback exists): no format-fix retry, a failed load escalates at once. */
-export async function solveAdaptive(afm: AFMProvider, task: CodeTask, o: { extra: boolean; fast?: boolean; plan?: boolean }): Promise<AdaptiveResult> {
-  let afmCalls = 1;
-  const t0 = Date.now();
-  let g = await generate(afm, task, 0, "", o.plan ?? true);
-  let genMs = Date.now() - t0;
-  if (!g.ok || !g.code.trim()) return { code: "", candidates: 0, agreement: 0, consensus: false, repairs: 0, unverifiable: true, afmCalls, stage: "first", genMs };
-  let f = await formatGate(task, g.code);
-  if (!f.ok && !o.fast) { const t1 = Date.now(); const g2 = await generate(afm, task, 0, `\n\nYOUR PREVIOUS CODE FAILED TO LOAD:\n${f.out.slice(-800)}\nFix it.`, o.plan ?? true); genMs += Date.now() - t1; afmCalls++; if (g2.ok) { g = g2; f = await formatGate(task, g.code); } }
-  const t2 = Date.now();
-  const examplesOk = f.ok ? await verifiable(task, g.code) : (task.examples?.(g.code) ? false : undefined);
-  const checkMs = Date.now() - t2;
-  const first: AdaptiveResult = { code: g.code, candidates: 1, examplesOk, agreement: 1, consensus: false, repairs: 0, unverifiable: examplesOk === undefined, afmCalls, stage: "first", genMs, checkMs };
-  if (examplesOk !== false || !o.extra) return first;
-  const r = await solveLocal(afm, task, { k: 3, repairs: 1, seed: [{ code: g.code, formatOk: f.ok }], afmCalls });
-  return { ...r, stage: "extra", genMs, checkMs };
+/** Copilot's code for a task: a function body after the given signature and docstring, or a whole program after the
+ *  statement written as comments (how Copilot is used in an editor). */
+export async function copilotCandidate(ls: Filler, task: CodeTask, hint?: string, style?: "brute", o: { rounds?: number; approach?: string } = {}): Promise<{ code: string; accept: () => void } | undefined> {
+  const path = join(tmpdir(), "onbud-copilot", `${task.entry ?? "main"}${style ? "_brute" : ""}.py`);
+  const cm = (t: string) => t.split("\n").map((l) => `# ${l}`.trimEnd()).join("\n") + "\n";
+  // hint: why the previous code failed, as comments above the code (what a user would leave for Copilot); for the
+  // stress test's reference, a note asking for the plainest correct version.
+  // Keep the input and expected output at the start of feedback, not just the tail of a traceback.
+  const note = (hint ? "# A previous version failed:\n" + cm(hint.trim().slice(0, 2400)) : "")
+    + (o.approach ? "# Approach to check against the statement (not a specification):\n" + cm(o.approach) : "")
+    + (style === "brute" ? "# Brute force: the simplest correct solution, trying every possibility. Inputs will be tiny; speed does not matter.\n" : "");
+  // The file as a user would have it open: the statement as comments, then the code to continue — the given
+  // signature (a prompt that is code already, or the code after the statement), or for a program a main() that
+  // reads standard input, called below the cursor.
+  const lines = task.prompt.replace(/\s*$/, "").split("\n");
+  const codeAt = /^\s*(def |class |from |import |@|"""|#)/.test(lines.find((l) => l.trim()) ?? "") ? 0 : lines.findIndex((l) => /^(class |def |from |import |@)/.test(l));
+  let head: string, suffix = "\n";
+  if (task.kind === "function" && codeAt >= 0) {
+    const prose = lines.slice(0, codeAt).join("\n").replace(/\n*Starter code:\s*$/i, "").trim();
+    const code = lines.slice(codeAt).join("\n");
+    const last = lines.at(-1)!;
+    head = (prose ? cm(prose) + "\n" : "") + note + code + "\n" + (/:\s*$/.test(last) ? (/^\s*/.exec(last)![0] + "    ") : "");
+  } else {
+    head = cm(task.prompt.trim()) + note + "\nimport sys\n\n\ndef main():\n    ";
+    suffix = "\n\n\nif __name__ == \"__main__\":\n    main()\n";
+  }
+  const r = await fill(ls, path, "python", head, suffix, o.rounds ?? (task.kind === "function" ? 4 : 8));
+  if (!r.text.trim()) return undefined;
+  const code = head + r.text + (suffix.trim() ? suffix : "");
+  return { code: note ? code.replace(note, "") : code, accept: () => r.items.forEach((it) => ls.accept(it)) };
 }
+
+/** More writing effort only after a failed example. The first completion stays unchanged for simple functions;
+ *  the last attempt gets an independent local reading of the statement, not another code-writing model. */
+/** notes: approach notes from the pattern dictionary (code-patterns.ts), above the code of every sample. */
+export async function solveCopilot(ls: Filler, task: CodeTask, afm?: AFMProvider, initialHint?: string, notes?: string, maxCandidates = 3): Promise<{
+  candidate?: Awaited<ReturnType<typeof copilotCandidate>>; examplesOk?: boolean;
+  repairs: number; candidates: number; afmCalls: number; requests: number;
+}> {
+  let requests = 0, candidates = 0, repairs = 0, afmCalls = 0;
+  // Bound actual inline requests, including continuation chunks and empty suggestions, across all samples.
+  const bounded: Filler = {
+    complete: async (...args) => requests < 10 ? (requests++, ls.complete(...args)) : undefined,
+    accept: (item) => ls.accept(item), close: (path) => ls.close(path),
+  };
+  let candidate: Awaited<ReturnType<typeof copilotCandidate>>, examplesOk: boolean | undefined, feedback = "";
+  for (let i = 0; i < maxCandidates && requests < 10; i++) {
+    let approach: string | undefined;
+    if (i === 2 && afm) {
+      afmCalls++;
+      const r = await afm.generate({
+        system: "Plan a Python solution from the statement. Do not write code. State the algorithm, the invariant that makes it correct, and its time complexity within the constraints. Read the rules literally; check the public example but do not special-case it. The previous attempt may have used the wrong algorithm.",
+        user: `${task.prompt}\n\nPrevious attempt's example feedback:\n${feedback.slice(0, 2400)}`,
+        schema: { type: "object", properties: { approach: { type: "string" }, invariant: { type: "string" }, complexity: { type: "string" } }, required: ["approach", "invariant", "complexity"], additionalProperties: false },
+        maxTokens: 450, timeoutMs: 60_000,
+      });
+      if (r.ok) approach = ["approach", "invariant", "complexity"].map((k) => (r.json as any)?.[k]).filter((s) => typeof s === "string").join("\n").slice(0, 2400);
+    }
+    const hint = i === 0 ? initialHint : `${feedback}\nRe-read the statement and derive a correct algorithm before implementing. Check the input above gives the expected output; do not patch only that example.`;
+    const cp = await copilotCandidate(bounded, task, hint, undefined, { approach: [notes, approach].filter(Boolean).join("\n\n") || undefined });
+    candidates++; repairs = i;
+    const ex = cp ? await task.examples?.(cp.code) : undefined;
+    if (cp && ex?.ok !== false) return { candidate: cp, examplesOk: ex?.ok, repairs, candidates, afmCalls, requests };
+    if (!candidate && cp) { candidate = cp; examplesOk = ex?.ok; }
+    feedback = ex?.out ?? "No implementation was completed. Write the complete solution.";
+  }
+  return { candidate, examplesOk, repairs, candidates, afmCalls, requests };
+}
+
+// The stress test, the gate policy and the adaptive/S5 graphs that use these generators: code-skill.ts.

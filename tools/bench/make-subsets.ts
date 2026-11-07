@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-const D = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "bench", "code");
+const D = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "bench", "code");
 const OUT = new URL("./subsets/", import.meta.url).pathname;
 const jsonl = (f: string) => readFileSync(join(D, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 let seed = 20261030;

@@ -1,0 +1,52 @@
+{
+  "id": "core",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Triage, routing, the final answer and its citation/grounding checks, memory, and the escalation decision (hand-off itself is the frontier skill).",
+  "examples": [
+    "What does this project do?",
+    "이 프로젝트에서 가장 중요한 파일이 뭐야?"
+  ],
+  "reasonCodes": [
+    "local_other",
+    "unclassified",
+    "afm_triage_escalate",
+    "afm_needs_escalation",
+    "afm_needs_detail",
+    "afm_failed",
+    "afm_unavailable",
+    "needs_escalation",
+    "needs_project_folder",
+    "missing_target",
+    "destructive_command",
+    "verification_task",
+    "research_critical",
+    "too_many_files",
+    "context_too_large",
+    "complex_*",
+    "decima_local_afm",
+    "decima_frontier_gpt",
+    "decima_frontier_claude",
+    "decima_ask_user",
+    "decima_run_verification",
+    "afm_answer_*",
+    "afm_tool_*",
+    "skill_*"
+  ],
+  "capabilities": [
+    "read",
+    "propose"
+  ],
+  "lane": "contained",
+  "egress": "none",
+  "checks": [
+    "reply_language",
+    "cited_paths_exist",
+    "quotes_in_evidence"
+  ],
+  "budget": {
+    "afmCalls": 6,
+    "latencyMs": 60000,
+    "frontierCalls": 0
+  }
+}

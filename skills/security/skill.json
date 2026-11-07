@@ -1,0 +1,38 @@
+{
+  "id": "security",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Local security check (secrets in the project and shell history, credential files, system settings, open ports) and privacy scans of documents before they are shared; values are always masked.",
+  "examples": [
+    "로컬 보안 점검해줘",
+    "Is notes.md safe to share?"
+  ],
+  "reasonCodes": [
+    "local_security_check",
+    "local_privacy_scan"
+  ],
+  "capabilities": [
+    "read"
+  ],
+  "lane": "contained",
+  "egress": "none",
+  "checks": [
+    "findings_have_location",
+    "reply_language"
+  ],
+  "budget": {
+    "afmCalls": 2,
+    "latencyMs": 60000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "security_check": [
+      "Are there exposed API keys or open ports on this machine?",
+      "내 컴퓨터 보안 상태 점검해줘"
+    ],
+    "privacy_scan": [
+      "Does report.docx contain personal information before I send it?",
+      "이 문서 외부에 공유해도 될까? 개인정보 확인해줘"
+    ]
+  }
+}

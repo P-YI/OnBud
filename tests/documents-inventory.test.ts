@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.OPENAFM_HOME = mkdtempSync(join(tmpdir(), "openafm-home-"));
+process.env.ONBUD_HOME = mkdtempSync(join(tmpdir(), "onbud-home-"));
 const { kindOf, readDocument, humanSize } = await import("../services/context-builder/documents.ts");
 const { isInventoryRequest, targetDir, walk, buildInventory, renderInventory, realAuthors } = await import("../services/controller/inventory.ts");
 const { keyFacts, renderCapsule, capsuleFidelity } = await import("../services/context-builder/capsule.ts");
@@ -14,7 +14,7 @@ const { MemoryStore } = await import("../services/memory/memory.ts");
 const { FakeAFM, isTriage, isPick, isArgs, isAnswer, makeRepo } = await import("./helpers.ts");
 
 const root = makeRepo({
-  "paper.rtf": "{\\rtf1\\ansi Temporal Heads in Language Models. We study attention heads.}",
+  "paper.rtf": "{\\rtf1\\ansi Sparse Attention in Language Models. We study attention heads.}",
   "notes.md": "# Meeting notes\nDiscussed the GRPO reward bug.\n",
   "train.py": "def reward(x):\n    return x\n",
   "docs/guide.md": "Guide for setup\n",
@@ -29,7 +29,7 @@ test("document kinds and extraction (rtf via textutil, md read)", async () => {
   assert.equal(kindOf("t.py"), "code");
   const rtf = await readDocument(root, "paper.rtf", { withMetadata: false });
   assert.equal(rtf.method, "textutil");
-  assert.match(rtf.text, /Temporal Heads/);
+  assert.match(rtf.text, /Sparse Attention/);
   const md = await readDocument(root, "notes.md", { withMetadata: false });
   assert.match(md.text, /GRPO reward bug/);
   assert.equal((await readDocument(root, ".env", { withMetadata: false })).error, "blocked:secret_path");
@@ -54,7 +54,7 @@ test("inventory intent detection (ko/en) and target folder", () => {
   assert.equal(targetDir("이 폴더 파일 목록", root), ".");
   const w = walk(root);
   assert.ok(w.files.includes("docs/guide.md") && !w.files.includes(".env"));
-  assert.deepEqual(realAuthors(["LaTeX with hyperref", "Yein Park", "Hwp 2024 13.0"]), ["Yein Park"]);
+  assert.deepEqual(realAuthors(["LaTeX with hyperref", "Mina Cho", "Hwp 2024 13.0"]), ["Mina Cho"]);
 });
 
 test("inventory: lists only real files, describes via AFM, Korean retry, salvage, memory reuse", async () => {
@@ -63,14 +63,14 @@ test("inventory: lists only real files, describes via AFM, Korean retry, salvage
   let calls = 0;
   const afm = new FakeAFM((r) => {
     calls++;
-    if (r.user.includes("File: paper.rtf")) return r.system.includes("previous summary") ? { json: { title: "Temporal Heads", doc_type: "paper", summary: "시간 헤드를 다루는 논문" } } : { json: { title: "Temporal Heads", doc_type: "paper", summary: "A paper about heads" } };
+    if (r.user.includes("File: paper.rtf")) return r.system.includes("previous summary") ? { json: { title: "Sparse Attention", doc_type: "paper", summary: "시간 헤드를 다루는 논문" } } : { json: { title: "Sparse Attention", doc_type: "paper", summary: "A paper about heads" } };
     if (r.user.includes("File: notes.md")) return { failure: "schema_violation", json: { title: "", doc_type: "meeting", summary: "회의 노트" } };
     return { json: { title: "", doc_type: "code", summary: "보상 함수 코드" } };
   });
   const inv = await buildInventory(root, "디렉토리 문서 나열해줘", { afm, db, memory, projectHash: "p", timeoutMs: 1000 });
   const out = renderInventory(inv);
   assert.match(out, /파일 \d+개/);
-  assert.match(out, /paper\.rtf.*Temporal Heads/);
+  assert.match(out, /paper\.rtf.*Sparse Attention/);
   assert.match(out, /시간 헤드를 다루는 논문/);           // Korean retry used
   assert.match(out, /회의 노트/);                         // salvaged schema violation
   assert.doesNotMatch(out, /\.env/);

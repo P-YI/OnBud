@@ -21,7 +21,7 @@ import { findMainTex, hasTeX, parseLatexLog, trialCompileCommand } from "../cont
 export interface EditProposal { path: string; oldText: string; newText: string; explanation: string; baseHash: string; preservesBehaviour?: boolean }
 export interface TrialResult { ok: boolean; stage: "apply" | "syntax" | "tests" | "no_tests"; command?: string; result?: CommandResult; diff: string; edit: EditProposal; preexisting?: string[] }
 
-const SANDBOX_ROOT = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "sandbox");
+const SANDBOX_ROOT = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "sandbox");
 const MAX_FILES = 20_000;   // larger trees are not cloned: hand off to Codex instead
 export const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 
@@ -189,7 +189,8 @@ export function detectTestCommand(root: string, editedPath?: string): string | u
   const has = (p: string) => existsSync(join(root, p));
   const py = has(".venv/bin/python") ? ".venv/bin/python" : has("venv/bin/python") ? "venv/bin/python" : "python3";
   const stem = editedPath ? basename(editedPath, extname(editedPath)) : "";
-  if (editedPath?.endsWith(".py") || has("pytest.ini") || has("conftest.py") || has("tests") || has("test")) {
+  const rootTests = (() => { try { return readdirSync(root).some((f) => /^test_.*\.py$|_test\.py$/.test(f)); } catch { return false; } })();
+  if (editedPath?.endsWith(".py") || has("pytest.ini") || has("conftest.py") || has("tests") || has("test") || rootTests) {
     const pyproject = has("pyproject.toml") ? readFileSync(join(root, "pyproject.toml"), "utf8") : "";
     const testDirs = ["tests", "test", "."].filter(has);
     const match = stem && testDirs.map((d) => join(d, `test_${stem}.py`)).find(has);

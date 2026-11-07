@@ -5,21 +5,21 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>OpenAFM</string>
+	<string>OnBud</string>
 	<key>CFBundleExecutable</key>
-	<string>OpenAFMWidget</string>
+	<string>OnBudWidget</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.openafm.spotlight.widget</string>
+	<string>dev.onbud.spotlight.widget</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>OpenAFMWidget</string>
+	<string>OnBudWidget</string>
 	<key>CFBundlePackageType</key>
 	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>NSExtension</key>

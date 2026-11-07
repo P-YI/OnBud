@@ -1,0 +1,9 @@
+{"id": "files-routing-thresholds", "q": "Which file defines the routing thresholds?", "root": "repo", "expect": {"answer": "routing\\.yaml"}}
+{"id": "files-list-skill-prompts", "q": "List the skills in policies/skills.", "root": "repo", "expect": {"answer": "small-edit|code-explain|diff-review"}}
+{"id": "files-ko-folder-overview", "family": "folder-overview", "q": "policies 폴더에 어떤 파일들이 있어?", "root": "repo", "expect": {"answer": "routing\\.yaml|AFM\\.md"}}
+{"id": "files-folder-overview-en", "family": "folder-overview", "q": "What files are in the policies folder?", "root": "repo", "expect": {"answer": "routing\\.yaml|AFM\\.md"}}
+{"id": "files-topic-en-about", "family": "find-by-topic", "q": "Find the document about Velvet Lattice Theorem", "root": "fixture:topic-docs", "expect": {"skill": "files", "answer": "q3_draft_b\\.pdf|memo_k2\\.docx", "notAnswer": "unrelated_notes"}}
+{"id": "files-topic-ko-related", "family": "find-by-topic", "q": "Velvet Lattice Theorem 관련 문서 찾아줘", "root": "fixture:topic-docs", "expect": {"skill": "files", "answer": "q3_draft_b\\.pdf|memo_k2\\.docx", "notAnswer": "unrelated_notes"}}
+{"id": "files-topic-en-content", "family": "find-by-topic", "q": "Which file mentions Velvet Lattice Theorem in its content?", "root": "fixture:topic-docs", "expect": {"skill": "files", "answer": "q3_draft_b\\.pdf|memo_k2\\.docx"}}
+{"id": "files-topic-pdf-kind", "family": "find-by-topic", "q": "Find the PDF about Velvet Lattice Theorem", "root": "fixture:topic-docs", "expect": {"skill": "files", "answer": "q3_draft_b\\.pdf", "notAnswer": "memo_k2\\.docx"}}
+{"id": "files-name-still-works", "family": "find-by-name", "q": "Find q3_draft_b.pdf on my Mac", "root": "fixture:topic-docs", "expect": {"skill": "files", "answer": "q3_draft_b\\.pdf"}}

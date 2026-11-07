@@ -21,7 +21,7 @@ struct Turn: Identifiable, Equatable {
 @MainActor
 final class AppState: ObservableObject {
     static let shared = AppState()
-    let paths = OpenAFMPaths()
+    let paths = OnBudPaths()
     private let defaults = UserDefaults.standard
     private let historyStore = HistoryStore()
 
@@ -35,6 +35,9 @@ final class AppState: ObservableObject {
     @Published var attachments: [Attachment] = []
     @Published var history: [SavedChat] = []
     @Published var collapsed = false     // answers folded away (the chat stays)
+    @Published var showEarlier = false   // earlier answers of this chat unfolded (folded again on every send)
+    @Published var olderInHistory = 0    // answers dropped from the panel (more than `maxEarlier`); the saved chat has them
+    static let maxEarlier = 5
 
     @Published var hotKey: HotKeyChoice { didSet { defaults.set(hotKey.rawValue, forKey: "hotKey"); onHotKeyChange?(hotKey) } }
     @Published var useDecima: Bool { didSet { defaults.set(useDecima, forKey: "useDecima") } }
@@ -106,6 +109,7 @@ final class AppState: ObservableObject {
         conversation = Conversation(root: projectRoot)
         chatID = UUID()
         turns = []; awaiting = nil; running = false; notice = nil; lastSent = nil; attachments = []; collapsed = false
+        showEarlier = false; olderInHistory = 0
         updateWidget()
     }
 
@@ -133,8 +137,9 @@ final class AppState: ObservableObject {
         let content = Attachments.compose(text, attachments, root: conversation.root)
         conversation.messages.append(ChatMessage(role: "user", content: content))
         turns.append(Turn(prompt: text, attachments: attachments.map(\.label)))
+        trimTurns()
         attachments = []
-        awaiting = nil; running = true; collapsed = false
+        awaiting = nil; running = true; collapsed = false; showEarlier = false
         let client = ControllerClient(token: token, setting: setting, web: pluginEnabled(.web), routerModel: activeRouter?.name)
         let messages = conversation.messages, root = conversation.root
         let chat = chatID
@@ -172,6 +177,13 @@ final class AppState: ObservableObject {
             self.updateWidget()
             self.notifyIfHidden(text: splitMeta(reply).body)
         }
+    }
+
+    /** The panel keeps the current answer and at most `maxEarlier` earlier ones (folded by default); the
+     *  controller still gets the whole chat as history, and the saved chat (History) keeps every turn. */
+    private func trimTurns() {
+        let extra = turns.count - (Self.maxEarlier + 1)
+        if extra > 0 { turns.removeFirst(extra); olderInHistory += extra }
     }
 
     private func updateLast(_ f: (inout Turn) -> Void) {
@@ -223,10 +235,23 @@ final class AppState: ObservableObject {
 
     // MARK: answers
 
-    func copy(_ turn: Turn) {
+    enum CopyPart { case answer, question, both }
+    func copy(_ turn: Turn, _ part: CopyPart = .answer) {
+        let text: String
+        switch part {
+        case .answer: text = turn.reply
+        case .question: text = turn.prompt
+        case .both: text = "Q: \(turn.prompt)\n\n\(turn.reply)"
+        }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(turn.reply, forType: .string)
-        notice = "Answer copied."
+        NSPasteboard.general.setString(text, forType: .string)
+        notice = part == .answer ? "Answer copied." : part == .question ? "Question copied." : "Question and answer copied."
+    }
+
+    /** Puts an earlier question back into the field to edit and ask again. */
+    func reuse(_ turn: Turn) {
+        query = turn.prompt
+        notice = "Question copied into the field: edit it and press ↩."
     }
 
     func save(_ turn: Turn) {
@@ -269,7 +294,8 @@ final class AppState: ObservableObject {
             t.running = false
             return t
         }
-        awaiting = nil; running = false; attachments = []; collapsed = false
+        awaiting = nil; running = false; attachments = []; collapsed = false; showEarlier = false; olderInHistory = 0
+        trimTurns()
         lastSent = chat.date
         updateWidget()
         notice = chat.root.map { "Chat in \(URL(fileURLWithPath: $0).lastPathComponent) · \(chat.date.formatted(date: .abbreviated, time: .shortened))" }
@@ -332,7 +358,7 @@ final class AppState: ObservableObject {
     private func notifyIfHidden(text: String) {
         guard notifyWhenDone, !isPanelVisible() else { return }
         let content = UNMutableNotificationContent()
-        content.title = "OpenAFM answered"
+        content.title = "OnBud answered"
         content.body = String(text.prefix(160))
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
@@ -351,11 +377,28 @@ final class AppState: ObservableObject {
 
     /** Opens Terminal with the plugin's install commands; the script asks before running anything. */
     func install(_ id: PluginID) {
-        runInTerminal(Plugins.installCommandFile(id, repo: paths.repo), prefix: "openafm-install-")
+        runInTerminal(Plugins.installCommandFile(id, repo: paths.repo), prefix: "onbud-install-")
         notice = "Installing \(id.name) in Terminal. Press Check again when it is done."
     }
 
     /** Writes a one-off .command script (owner-only) and opens it in Terminal; earlier ones are removed. */
+    /** Opens a Ghostty window in the home folder that runs `file`; nil on success, else the error text. */
+    static func runInGhostty(_ file: URL) -> String? {
+        func asString(_ v: String) -> String { "\"" + v.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
+        let source = """
+        tell application "Ghostty"
+          set cfg to new surface configuration
+          set initial working directory of cfg to \(asString(NSHomeDirectory()))
+          set initial input of cfg to \(asString(shellQuote(file.path))) & linefeed
+          new window with configuration cfg
+          activate
+        end tell
+        """
+        var error: NSDictionary?
+        _ = NSAppleScript(source: source)?.executeAndReturnError(&error)
+        return error.map { ($0[NSAppleScript.errorMessage] as? String) ?? "AppleScript error \($0[NSAppleScript.errorNumber] ?? "?")" }
+    }
+
     func runInTerminal(_ script: String, prefix: String) {
         let tmp = FileManager.default.temporaryDirectory
         for old in (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? [] where old.lastPathComponent.hasPrefix(prefix) {
@@ -365,7 +408,22 @@ final class AppState: ObservableObject {
         do {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
-            NSWorkspace.shared.open(file)
+            // The terminal chosen in Settings > Apps (apps.json, shared with the controller), else the macOS default.
+            if let t = AppChoices.load().terminal, let app = AppChoices.appURL(t) {
+                if t.lowercased() == "ghostty" {
+                    // Ghostty does not run .command files (it opens an empty window): ask it through its AppleScript
+                    // dictionary (Ghostty ≥ 1.3) for a window that types the script's path. macOS asks once for
+                    // Automation access; if that is denied or fails, Terminal runs the script instead.
+                    if let err = Self.runInGhostty(file) {
+                        notice = "Ghostty did not take the script (\(err)); opened it in Terminal instead. Allow OnBud to control Ghostty in System Settings > Privacy & Security > Automation."
+                        NSWorkspace.shared.open([file], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"), configuration: NSWorkspace.OpenConfiguration())
+                    }
+                } else {
+                    NSWorkspace.shared.open([file], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+                }
+            } else {
+                NSWorkspace.shared.open(file)
+            }
         } catch { notice = "Could not open Terminal: \(error.localizedDescription)" }
     }
 
@@ -377,8 +435,8 @@ final class AppState: ObservableObject {
             .flatMap { FileManager.default.fileExists(atPath: $0.appendingPathComponent("scripts/setup.sh").path) ? $0 : nil }
     }
 
-    /** Opens Terminal with the setup: copies the bundled controller to ~/OpenAFM/adaptive-coding-agent (never
-     *  over a git checkout or a folder that is not an OpenAFM copy), then runs its scripts/setup.sh, which
+    /** Opens Terminal with the setup: copies the bundled controller to ~/OnBud/adaptive-coding-agent (never
+     *  over a git checkout or a folder that is not an OnBud copy), then runs its scripts/setup.sh, which
      *  asks before installing anything. */
     func runSetup() {
         let dest = paths.repo.path
@@ -387,12 +445,12 @@ final class AppState: ObservableObject {
             script += """
             SRC=\(shellQuote(src.path))
             if [ -d "$DEST/.git" ]; then
-              echo "Using your OpenAFM checkout in $DEST."
-            elif [ ! -e "$DEST" ] || [ -f "$DEST/.openafm-bundled" ]; then
-              echo "Copying the OpenAFM controller ($(cat "$SRC/.openafm-bundled")) to $DEST"
+              echo "Using your OnBud checkout in $DEST."
+            elif [ ! -e "$DEST" ] || [ -f "$DEST/.onbud-bundled" ] || [ -f "$DEST/\(LegacyMigration.oldMarker)" ]; then
+              echo "Copying the OnBud controller ($(cat "$SRC/.onbud-bundled")) to $DEST"
               mkdir -p "$DEST" && rsync -a --delete "$SRC/" "$DEST/" || exit 1
             else
-              echo "$DEST exists but is not an OpenAFM copy; leaving it alone. Move it away and run setup again."; exit 1
+              echo "$DEST exists but is not an OnBud copy; leaving it alone. Move it away and run setup again."; exit 1
             fi
 
             """
@@ -409,20 +467,64 @@ final class AppState: ObservableObject {
 
             """
         }
-        script += "[ -x \"$DEST/scripts/setup.sh\" ] || { echo \"No OpenAFM controller in $DEST.\"; exit 1; }\n/bin/bash \"$DEST/scripts/setup.sh\"\n"
-        runInTerminal(script, prefix: "openafm-setup-")
-        notice = "Setting up OpenAFM in Terminal. Press Check again when it is done."
+        script += "[ -x \"$DEST/scripts/setup.sh\" ] || { echo \"No OnBud controller in $DEST.\"; exit 1; }\n/bin/bash \"$DEST/scripts/setup.sh\"\n"
+        runInTerminal(script, prefix: "onbud-setup-")
+        notice = "Setting up OnBud in Terminal. Press Check again when it is done."
     }
 
     /** The installed controller copy is older than the one in this app (a git checkout is never "older"). */
     var backendOutdated: Bool {
         guard let src = bundledBackend,
-              let mine = try? String(contentsOf: src.appendingPathComponent(".openafm-bundled"), encoding: .utf8),
-              let theirs = try? String(contentsOf: paths.repo.appendingPathComponent(".openafm-bundled"), encoding: .utf8) else { return false }
+              let mine = try? String(contentsOf: src.appendingPathComponent(".onbud-bundled"), encoding: .utf8),
+              let theirs = [".onbud-bundled", LegacyMigration.oldMarker].lazy
+                .compactMap({ try? String(contentsOf: self.paths.repo.appendingPathComponent($0), encoding: .utf8) }).first else { return false }
         return mine.trimmingCharacters(in: .whitespacesAndNewlines) != theirs.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: bundled pdftext (PDF text + Vision OCR helper the controller runs from ~/OpenAFM/runtime/bin)
+    // MARK: optional services (Ollaya for the router model, SearXNG for web search): started on demand
+
+    @Published var serviceBusy: Set<OptionalService> = []
+
+    /** Starts the service now: through its LaunchAgent if "Start at login" is on, else its setup script (tmux). */
+    func startService(_ s: OptionalService) { runService(s, s.startsAtLogin
+        ? [["/bin/launchctl", "bootstrap", "gui/\(getuid())", s.launchAgent.path], ["/bin/launchctl", "kickstart", "gui/\(getuid())/\(s.label)"]]
+        : [["/bin/bash", paths.repo.appendingPathComponent(s.setupScript).path, "start"]], done: "started") }
+
+    /** Stops it until the next start (a login LaunchAgent stays installed and starts it again at the next login). */
+    func stopService(_ s: OptionalService) { runService(s, (s.startsAtLogin ? [["/bin/launchctl", "bootout", "gui/\(getuid())/\(s.label)"]] : [])
+        + [["/bin/bash", paths.repo.appendingPathComponent(s.setupScript).path, "stop"]], done: "stopped") }
+
+    /** "Start at login": installs or removes its LaunchAgent (scripts/afm-launchagent.sh). Off by default. */
+    func setLoginStart(_ s: OptionalService, _ on: Bool) {
+        runService(s, [["/bin/bash", paths.repo.appendingPathComponent("scripts/afm-launchagent.sh").path, on ? "install" : "uninstall", s.rawValue]],
+                   done: on ? "set to start at login" : "no longer starts at login")
+    }
+
+    private func runService(_ s: OptionalService, _ commands: [[String]], done: String) {
+        guard !serviceBusy.contains(s) else { return }
+        serviceBusy.insert(s)
+        notice = nil
+        Task {
+            // Apps opened from Finder lack Homebrew on PATH; the scripts need tmux and curl from there.
+            let env = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": NSHomeDirectory(), "ONBUD_HOME": paths.home.path]
+            let ok = await Task.detached { () -> Bool in
+                var ok = true
+                for c in commands {
+                    let p = Process()
+                    p.executableURL = URL(fileURLWithPath: c[0]); p.arguments = Array(c.dropFirst()); p.environment = env
+                    p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+                    do { try p.run(); p.waitUntilExit(); if p.terminationStatus != 0 && !c[0].hasSuffix("launchctl") { ok = false } } catch { ok = false }
+                }
+                return ok
+            }.value
+            await probe()
+            serviceBusy.remove(s)
+            notice = ok ? "\(s.name) \(done)." : "\(s.name): the command failed (see ~/OnBud/runtime/logs)."
+            objectWillChange.send()
+        }
+    }
+
+    // MARK: bundled pdftext (PDF text + Vision OCR helper the controller runs from ~/OnBud/runtime/bin)
 
     var bundledPdftext: URL? { Bundle.main.url(forAuxiliaryExecutable: "pdftext") }
     var installedPdftext: URL { paths.home.appendingPathComponent("runtime/bin/pdftext") }
@@ -462,17 +564,33 @@ final class AppState: ObservableObject {
                         for _ in 0..<30 where service == nil { try await Task.sleep(for: .milliseconds(500)); service = OpenCodeService.load() }
                     }
                     guard let service else { throw HandoffError("OpenCode's service did not start; open OpenCode once and try again.") }
-                    _ = try await service.startSession(dir: dir, agent: "codex", title: "OpenAFM · \(prompt.prefix(40))", text: text)
+                    _ = try await service.startSession(dir: dir, agent: "codex", title: "OnBud · \(prompt.prefix(40))", text: text)
                     let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = true
                     _ = try? await ws.openApplication(at: app, configuration: cfg)
-                    notice = "Sent to Codex in OpenCode — the new session “OpenAFM · …” is at the top of the session list."
+                    notice = "Sent to Codex in OpenCode — the new session “OnBud · …” is at the top of the session list."
                 } catch {
                     notice = "Could not hand off: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
                 }
             }
         } else if let cli = OpenCodeInstall.cli {
-            runInTerminal(OpenCodeHandoff.cliScript(cli: cli.path, dir: dir, prompt: text), prefix: "openafm-codex-")
-            notice = "Opened OpenCode (CLI) in Terminal on the codex agent with this request."
+            // OpenCode 2's TUI cannot pick an agent: start the session on codex through the CLI's background
+            // service, then open the TUI on it. Without the service, a one-shot `opencode run --agent codex`.
+            notice = "Starting a Codex session in OpenCode…"
+            Task {
+                var service = OpenCodeService.load()
+                if service == nil {
+                    let path = cli.path
+                    _ = await Task.detached { RoutingModel.run(path, ["service", "start"], capture: false) }.value
+                    for _ in 0..<20 where service == nil { try? await Task.sleep(for: .milliseconds(500)); service = OpenCodeService.load() }
+                }
+                if let service, let id = try? await service.startSession(dir: dir, agent: "codex", title: "OnBud · \(prompt.prefix(40))", text: text) {
+                    runInTerminal(OpenCodeHandoff.sessionScript(cli: cli.path, dir: dir, session: id), prefix: "onbud-codex-")
+                    notice = "Sent to Codex: OpenCode opens in Terminal on the new session."
+                } else {
+                    runInTerminal(OpenCodeHandoff.runScript(cli: cli.path, dir: dir, prompt: text), prefix: "onbud-codex-")
+                    notice = "OpenCode's service was not reachable: Terminal runs the request once on the codex agent (`opencode run`)."
+                }
+            }
         } else {
             notice = "OpenCode is not installed."
         }
@@ -485,11 +603,11 @@ final class AppState: ObservableObject {
         projectRoot = path
     }
 
-    // MARK: openafm:// URLs (Shortcuts, Raycast, scripts) — they only fill the panel, never send
+    // MARK: onbud:// URLs (Shortcuts, Raycast, scripts) — they only fill the panel, never send
 
-    /** openafm://ask?q=<text>[&folder=<path>] opens the panel with the question typed in. */
+    /** onbud://ask?q=<text>[&folder=<path>] opens the panel with the question typed in. */
     func handle(url: URL) {
-        guard url.scheme == "openafm", let c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        guard url.scheme == "onbud", let c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
         let item = { (name: String) in c.queryItems?.first { $0.name == name }?.value }
         if let folder = item("folder") { setProjectFolder((folder as NSString).expandingTildeInPath) }
         if c.host == "ask", let q = item("q") { query = String(q.prefix(2000)) }
@@ -503,7 +621,7 @@ final class AppState: ObservableObject {
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
             objectWillChange.send()
-            return SMAppService.mainApp.status == .requiresApproval ? "Approve OpenAFM in System Settings > General > Login Items." : nil
+            return SMAppService.mainApp.status == .requiresApproval ? "Approve OnBud in System Settings > General > Login Items." : nil
         } catch { return error.localizedDescription }
     }
 }

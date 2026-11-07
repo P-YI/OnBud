@@ -1,5 +1,5 @@
 // Activity window: the controller's local jobs (each on its own git branch) and background sessions
-// (tmux -L openafm), with buttons that send the matching chat command through the panel.
+// (tmux -L onbud), with buttons that send the matching chat command through the panel.
 import SpotlightCore
 import SwiftUI
 
@@ -42,7 +42,7 @@ struct ActivityView: View {
                     HStack {
                         Text(s).font(.system(.body, design: .monospaced))
                         Spacer()
-                        Text("tmux -L openafm attach -t \(s)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text("tmux -L onbud attach -t \(s)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
                 Text("Ask “show the log” or “stop the session” in the panel to manage them.").font(.callout).foregroundStyle(.secondary)

@@ -1,0 +1,222 @@
+{
+ "about": "OnBud code skill: public pattern dictionary (original text, general algorithm knowledge; MIT like the repository). Each entry: when it applies, the idea, the invariant or pitfall that makes it correct, its cost, and a short Python skeleton. The code skill gives the best one or two as notes above the code Copilot writes.",
+ "version": 1,
+ "patterns": [
+  {
+   "id": "prefix_sums",
+   "name": "Prefix sums / difference array",
+   "signals": "many range-sum or range-count queries; add a value to many ranges then read all; subarray sum equals k",
+   "idea": "Precompute running totals so any range is a difference of two prefixes; for range updates add at l and subtract at r+1, then take the running sum.",
+   "invariant": "pre[i] = sum of a[0..i-1]; range [l, r] = pre[r+1] - pre[l]. For 'subarray sum = k' count earlier prefixes equal to cur - k in a dict (start with {0: 1}).",
+   "complexity": "O(n + q)",
+   "skeleton": "pre = [0]\nfor x in a: pre.append(pre[-1] + x)\nseen = {0: 1}; cur = ans = 0\nfor x in a:\n    cur += x; ans += seen.get(cur - k, 0); seen[cur] = seen.get(cur, 0) + 1"
+  },
+  {
+   "id": "sliding_window",
+   "name": "Sliding window / two pointers",
+   "signals": "longest or shortest contiguous subarray or substring with a condition that stays true when the window shrinks (at most k distinct, sum <= S, no repeats)",
+   "idea": "Extend the right end; while the window breaks the condition, move the left end. Each index enters and leaves once.",
+   "invariant": "The condition must be monotone in the window (shrinking never breaks it). Count windows ending at r as r - l + 1 when counting all valid subarrays.",
+   "complexity": "O(n)",
+   "skeleton": "l = 0; best = 0; cnt = {}\nfor r, x in enumerate(a):\n    cnt[x] = cnt.get(x, 0) + 1\n    while not ok(cnt):\n        cnt[a[l]] -= 1; l += 1\n    best = max(best, r - l + 1)"
+  },
+  {
+   "id": "binary_search_answer",
+   "name": "Binary search on the answer",
+   "signals": "minimise the maximum / maximise the minimum; 'smallest x such that feasible(x)'; answer range large (up to 1e9 or 1e18) but feasibility is easy to check",
+   "idea": "Feasibility is monotone in x, so search the boundary with a greedy or counting check.",
+   "invariant": "Keep lo infeasible and hi feasible (or the reverse) and stop when hi - lo == 1; check the monotonicity direction first.",
+   "complexity": "O(log R * cost of check)",
+   "skeleton": "lo, hi = lo0 - 1, hi0  # feasible(hi) is True, feasible(lo) is False\nwhile hi - lo > 1:\n    mid = (lo + hi) // 2\n    if feasible(mid): hi = mid\n    else: lo = mid\nreturn hi"
+  },
+  {
+   "id": "monotonic_stack",
+   "name": "Monotonic stack",
+   "signals": "next or previous greater/smaller element; largest rectangle; sum of subarray minimums or maximums; span problems",
+   "idea": "Keep a stack of indices with monotone values; popping an index means its nearest bigger/smaller element has been found.",
+   "invariant": "For contribution counting, use strict comparison on one side and non-strict on the other so equal values are counted once.",
+   "complexity": "O(n)",
+   "skeleton": "nxt = [n] * n; st = []\nfor i, x in enumerate(a):\n    while st and a[st[-1]] < x:\n        nxt[st.pop()] = i\n    st.append(i)"
+  },
+  {
+   "id": "heap_greedy",
+   "name": "Greedy with a heap",
+   "signals": "schedule jobs by deadline or start time; repeatedly take the smallest or largest; k best items; merge sorted lists; meeting rooms",
+   "idea": "Sort by one key, keep the candidates in a heap by the other, and pop the best (or drop the worst) as the sweep moves.",
+   "invariant": "State the exchange argument: why taking the heap's top now never hurts. Python heapq is a min-heap; push negatives for a max-heap.",
+   "complexity": "O(n log n)",
+   "skeleton": "import heapq\nitems.sort(key=lambda t: t[0])\nh = []\nfor key, val in items:\n    heapq.heappush(h, val)\n    if len(h) > k: heapq.heappop(h)"
+  },
+  {
+   "id": "sort_greedy",
+   "name": "Sort, then greedy / exchange argument",
+   "signals": "choose an order or a subset to optimise a sum; intervals to keep or remove; pairing items; minimum number of arrows/platforms",
+   "idea": "Find the sort key for which a local choice is always safe (earliest end, ratio, difference), then scan once.",
+   "invariant": "Prove by exchange: swapping two adjacent items out of order cannot improve the answer. Try a tiny counterexample before trusting it.",
+   "complexity": "O(n log n)",
+   "skeleton": "iv.sort(key=lambda t: t[1])\nend = float('-inf'); keep = 0\nfor s, e in iv:\n    if s >= end:\n        keep += 1; end = e"
+  },
+  {
+   "id": "sweep_line",
+   "name": "Sweep line over events",
+   "signals": "intervals overlapping; maximum simultaneous; events with timestamps; points covered by segments; process changes in time order",
+   "idea": "Turn each interval into start/end events, sort them, and sweep while maintaining a count or a structure.",
+   "invariant": "Decide the order of ties explicitly (end before start, or status changes before queries at the same time) — many wrong answers are tie order.",
+   "complexity": "O(n log n)",
+   "skeleton": "ev = []\nfor s, e in iv: ev += [(s, 1), (e, -1)]\nev.sort(key=lambda t: (t[0], t[1]))  # ends (-1) first at equal times\ncur = best = 0\nfor _, d in ev:\n    cur += d; best = max(best, cur)"
+  },
+  {
+   "id": "simulation_ordering",
+   "name": "Faithful simulation with explicit ordering",
+   "signals": "a long statement of rules over time (users online/offline, queues, timers, rounds); 'process X before Y at the same timestamp'; input events not guaranteed sorted",
+   "idea": "Write the state and apply events exactly as the statement says; sort the input by the stated key first.",
+   "invariant": "Re-read every tie rule and expiry rule (inclusive or exclusive end, 'comes back at t + d'); never assume the input is sorted unless the statement says so.",
+   "complexity": "O(n log n) for the sort plus the simulation",
+   "skeleton": "events.sort(key=lambda e: (int(e[1]), 0 if e[0] == 'STATUS' else 1))\nstate = init()\nfor ev in events:\n    expire(state, int(ev[1]))\n    apply(state, ev)"
+  },
+  {
+   "id": "dp_1d",
+   "name": "Dynamic programming over a sequence",
+   "signals": "count ways or optimise over a sequence where the choice at i depends on a few earlier states; take/skip; partition a string or array",
+   "idea": "Define dp[i] as the answer for the prefix of length i, write the transition from smaller prefixes, fill in order.",
+   "invariant": "State exactly what dp[i] means and its base case; take results modulo the required number at every step.",
+   "complexity": "O(n * transitions)",
+   "skeleton": "dp = [0] * (n + 1); dp[0] = base\nfor i in range(1, n + 1):\n    dp[i] = best(dp[i - 1] + gain(i), dp[i - 2] + other(i) if i >= 2 else dp[i - 1])\nreturn dp[n]"
+  },
+  {
+   "id": "dp_2d",
+   "name": "DP over two sequences or a grid",
+   "signals": "edit distance, LCS, longest palindromic subsequence, paths in a grid, matching two strings, interval [i, j] subproblems",
+   "idea": "dp[i][j] over prefixes of two sequences (or the substring i..j); fill by increasing length or by rows.",
+   "invariant": "For interval DP fill by increasing length; for extra resources (k operations) add a dimension and keep it small.",
+   "complexity": "O(n * m) (times the extra dimension)",
+   "skeleton": "# edit distance between a and b; interval DP fills by increasing length the same way\nn, m = len(a), len(b)\ndp = [[0] * (m + 1) for _ in range(n + 1)]\nfor i in range(n + 1): dp[i][0] = i\nfor j in range(m + 1): dp[0][j] = j\nfor i in range(1, n + 1):\n    for j in range(1, m + 1):\n        dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] != b[j - 1]))\nreturn dp[n][m]"
+  },
+  {
+   "id": "knapsack",
+   "name": "Knapsack / subset sum",
+   "signals": "pick items under a capacity; reach an exact sum; partition into two equal sums; count subsets with a sum",
+   "idea": "dp over capacity: for each item update capacities from high to low (0/1) or low to high (unbounded).",
+   "invariant": "Iterate capacity downward for 0/1 items so an item is used once; use a bitset (int shifts) for large boolean subset sums.",
+   "complexity": "O(n * W)",
+   "skeleton": "dp = [0] * (W + 1)\nfor w, v in items:\n    for c in range(W, w - 1, -1):\n        dp[c] = max(dp[c], dp[c - w] + v)"
+  },
+  {
+   "id": "bitmask_dp",
+   "name": "Bitmask DP",
+   "signals": "n <= 20 items; assign or visit every item once (TSP-like); choose subsets with pairwise constraints",
+   "idea": "dp[mask] (or dp[mask][last]) over subsets; transitions add one item to the mask.",
+   "invariant": "Check 2^n * n fits the limit (n <= 20); iterate masks in increasing order so smaller subsets are done first.",
+   "complexity": "O(2^n * n^2) or O(3^n) for submask enumeration",
+   "skeleton": "INF = float('inf')\ndp = [[INF] * n for _ in range(1 << n)]\nfor i in range(n): dp[1 << i][i] = start(i)\nfor m in range(1 << n):\n    for i in range(n):\n        if dp[m][i] == INF: continue\n        for j in range(n):\n            if not m >> j & 1:\n                dp[m | 1 << j][j] = min(dp[m | 1 << j][j], dp[m][i] + w[i][j])"
+  },
+  {
+   "id": "digit_dp",
+   "name": "Digit DP",
+   "signals": "count numbers in [L, R] with a digit property (sum of digits, no repeated digit, divisible by k); R up to 1e18",
+   "idea": "Count f(R) - f(L - 1) by walking the digits of the bound with a 'tight' flag and the property's state.",
+   "invariant": "Memoise only states with tight == False (or include tight in the key); handle leading zeros as their own state when they matter.",
+   "complexity": "O(digits * states * 10)",
+   "skeleton": "from functools import lru_cache\ndef count(N):\n    d = list(map(int, str(N)))\n    @lru_cache(maxsize=None)\n    def go(i, st, tight):\n        if i == len(d): return 1 if good(st) else 0\n        hi = d[i] if tight else 9\n        return sum(go(i + 1, step(st, x), tight and x == hi) for x in range(hi + 1))\n    return go(0, start, True)"
+  },
+  {
+   "id": "graph_bfs",
+   "name": "BFS / shortest path on unweighted graphs and grids",
+   "signals": "minimum number of moves or steps; grid with walls; word ladder; state space with unit cost; multi-source distance",
+   "idea": "Breadth-first from the source(s); the first time a node is reached is its shortest distance.",
+   "invariant": "Mark visited when pushing, not when popping; encode the full state (position plus keys, direction, steps left) as the node.",
+   "complexity": "O(V + E)",
+   "skeleton": "from collections import deque\ndist = {src: 0}; q = deque([src])\nwhile q:\n    u = q.popleft()\n    for v in nbrs(u):\n        if v not in dist:\n            dist[v] = dist[u] + 1; q.append(v)"
+  },
+  {
+   "id": "dijkstra",
+   "name": "Dijkstra (non-negative weights)",
+   "signals": "shortest path with weights; minimum cost or time to reach; 0-1 weights (use a deque); path with a resource as extra state",
+   "idea": "Pop the closest unsettled node from a heap and relax its edges.",
+   "invariant": "Skip stale heap entries (d > dist[u]); weights must be non-negative; add state dimensions to the node when costs depend on history.",
+   "complexity": "O((V + E) log V)",
+   "skeleton": "import heapq\ndist = {src: 0}; h = [(0, src)]\nwhile h:\n    d, u = heapq.heappop(h)\n    if d > dist.get(u, float('inf')): continue\n    for v, w in adj[u]:\n        nd = d + w\n        if nd < dist.get(v, float('inf')):\n            dist[v] = nd; heapq.heappush(h, (nd, v))"
+  },
+  {
+   "id": "union_find",
+   "name": "Union-find (disjoint sets)",
+   "signals": "connected components while edges are added; merging groups; cycle detection in undirected graphs; Kruskal MST; offline connectivity queries",
+   "idea": "Each set has a root; union links roots, find follows parents with path compression.",
+   "invariant": "Union by size and path compression keep operations near O(1); process queries offline (sorted by threshold) when edges have weights.",
+   "complexity": "O(alpha(n)) per operation",
+   "skeleton": "p = list(range(n)); sz = [1] * n\ndef find(x):\n    while p[x] != x:\n        p[x] = p[p[x]]; x = p[x]\n    return x\ndef union(a, b):\n    a, b = find(a), find(b)\n    if a == b: return False\n    if sz[a] < sz[b]: a, b = b, a\n    p[b] = a; sz[a] += sz[b]; return True"
+  },
+  {
+   "id": "topo_sort",
+   "name": "Topological order / DAG DP",
+   "signals": "prerequisites, build order, course schedule; longest path in a DAG; detect a cycle in a directed graph",
+   "idea": "Kahn's algorithm: repeatedly take nodes with in-degree zero; DP along that order for longest or counted paths.",
+   "invariant": "If fewer than n nodes are output there is a cycle.",
+   "complexity": "O(V + E)",
+   "skeleton": "from collections import deque\nindeg = [0] * n\nfor u in range(n):\n    for v in adj[u]: indeg[v] += 1\nq = deque(i for i in range(n) if indeg[i] == 0); order = []\nwhile q:\n    u = q.popleft(); order.append(u)\n    for v in adj[u]:\n        indeg[v] -= 1\n        if indeg[v] == 0: q.append(v)"
+  },
+  {
+   "id": "tree_dfs",
+   "name": "Tree DP / DFS on trees",
+   "signals": "rooted or unrooted tree; subtree sums or sizes; answer for every node (rerooting); diameter; choose nodes with parent/child constraints",
+   "idea": "Root the tree, compute subtree values bottom-up, then push values top-down if every node needs an answer.",
+   "invariant": "Use an explicit stack (or raise the recursion limit) for n up to 1e5; keep a parent array to avoid walking back.",
+   "complexity": "O(n)",
+   "skeleton": "order = []; parent = [-1] * n; st = [root]; seen = [False] * n; seen[root] = True\nwhile st:\n    u = st.pop(); order.append(u)\n    for v in adj[u]:\n        if not seen[v]: seen[v] = True; parent[v] = u; st.append(v)\nfor u in reversed(order):\n    for v in adj[u]:\n        if v != parent[u]: combine(u, v)"
+  },
+  {
+   "id": "fenwick_segment",
+   "name": "Fenwick tree / segment tree",
+   "signals": "point updates mixed with range queries; count inversions; k-th smallest online; range minimum with updates; coordinate compression needed",
+   "idea": "A Fenwick tree for prefix sums with point updates; a segment tree for min/max or lazy range updates.",
+   "invariant": "Compress coordinates to 1..m first; Fenwick indices are 1-based.",
+   "complexity": "O(log n) per operation",
+   "skeleton": "bit = [0] * (m + 1)\ndef add(i, v):\n    while i <= m: bit[i] += v; i += i & -i\ndef query(i):\n    s = 0\n    while i > 0: s += bit[i]; i -= i & -i\n    return s"
+  },
+  {
+   "id": "string_hash_kmp",
+   "name": "String matching: KMP / Z / rolling hash",
+   "signals": "find a pattern in a text many times; longest prefix that is also a suffix; periodic strings; compare many substrings",
+   "idea": "Prefix function (KMP) or Z-array give all matches in linear time; a rolling hash compares substrings in O(1).",
+   "invariant": "For hashing use a large modulus (or two) to avoid collisions; for KMP the prefix function of pattern + '#' + text gives matches.",
+   "complexity": "O(n + m)",
+   "skeleton": "def prefix_function(s):\n    pi = [0] * len(s)\n    for i in range(1, len(s)):\n        k = pi[i - 1]\n        while k and s[i] != s[k]: k = pi[k - 1]\n        if s[i] == s[k]: k += 1\n        pi[i] = k\n    return pi"
+  },
+  {
+   "id": "math_counting",
+   "name": "Combinatorics and modular arithmetic",
+   "signals": "count arrangements modulo 1e9+7; nCr for large n; answers that are sums over pairs; contribution of each element to all subsets",
+   "idea": "Precompute factorials and inverse factorials; count each element's contribution instead of enumerating sets.",
+   "invariant": "Modular inverse by pow(x, MOD - 2, MOD) for a prime MOD; reduce after every multiplication.",
+   "complexity": "O(n) precompute, O(1) per nCr",
+   "skeleton": "MOD = 10**9 + 7\nfact = [1] * (N + 1)\nfor i in range(1, N + 1): fact[i] = fact[i - 1] * i % MOD\ninv = [1] * (N + 1); inv[N] = pow(fact[N], MOD - 2, MOD)\nfor i in range(N, 0, -1): inv[i - 1] = inv[i] * i % MOD\ndef C(n, r): return 0 if r < 0 or r > n else fact[n] * inv[r] % MOD * inv[n - r] % MOD"
+  },
+  {
+   "id": "number_theory",
+   "name": "Number theory: gcd, sieve, divisors, digits",
+   "signals": "primes up to 1e6; gcd/lcm of many numbers; divisor counts; operations like floor division repeated until zero; digit or base manipulations",
+   "idea": "Sieve once for primes or smallest prime factors; count steps of repeated division by grouping numbers with the same number of steps.",
+   "invariant": "Precompute once and answer many queries; when a value goes through a repeated operation (halving, dividing by b) the number of steps is about log, so group values that need the same count instead of looping over a huge range.",
+   "complexity": "O(N log log N) sieve; O(log N) per group",
+   "skeleton": "# smallest prime factor sieve, then factorise in O(log x)\nspf = list(range(N + 1))\nfor i in range(2, int(N ** 0.5) + 1):\n    if spf[i] == i:\n        for j in range(i * i, N + 1, i):\n            if spf[j] == j: spf[j] = i\ndef factors(x):\n    out = []\n    while x > 1:\n        p = spf[x]; out.append(p)\n        while x % p == 0: x //= p\n    return out"
+  },
+  {
+   "id": "game_theory",
+   "name": "Games: win/lose states and Grundy numbers",
+   "signals": "two players alternate optimally; who wins; take stones; positions with moves to other positions",
+   "idea": "A position is winning if some move reaches a losing one; sums of independent games use XOR of Grundy numbers.",
+   "invariant": "Compute small cases by brute force and look for the pattern before writing a formula.",
+   "complexity": "O(states * moves)",
+   "skeleton": "from functools import lru_cache\n@lru_cache(maxsize=None)\ndef win(state):\n    return any(not win(nxt) for nxt in moves(state))"
+  },
+  {
+   "id": "matrix_grid",
+   "name": "Grid and matrix manipulation",
+   "signals": "rotate or transpose a matrix; spiral order; count islands; flood fill; 2D prefix sums for rectangle queries",
+   "idea": "Index carefully with (r, c); use direction arrays; 2D prefix sums for rectangle sums.",
+   "invariant": "Check bounds before indexing; zip(*m) transposes; copy rows (not references) when building new grids.",
+   "complexity": "O(rows * cols)",
+   "skeleton": "DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]\nfor dr, dc in DIRS:\n    nr, nc = r + dr, c + dc\n    if 0 <= nr < R and 0 <= nc < C and grid[nr][nc] != '#':\n        visit(nr, nc)"
+  }
+ ]
+}

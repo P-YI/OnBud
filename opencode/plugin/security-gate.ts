@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { redact, isSecretEnvName, type GateResult } from "../../services/security/gate.ts";
 import { evaluateTool } from "../../services/security/tool-gate.ts";
 
-const LOG_DIR = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "logs");
+const LOG_DIR = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "logs");
 const LOG = join(LOG_DIR, "security-gate.jsonl");
 
 // Metadata only: never the raw command, path or output.

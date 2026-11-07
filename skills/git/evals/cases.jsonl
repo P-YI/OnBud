@@ -1,0 +1,3 @@
+{"id": "git-current-branch", "family": "git-branch", "q": "What is the current git branch?", "root": "repo", "expect": {"answer": "\\bmain\\b"}}
+{"id": "git-status-en", "q": "What is the git status of this repo?", "root": "repo", "expect": {"answer": "\\bmain\\b"}}
+{"id": "git-current-branch-ko", "family": "git-branch", "q": "현재 git 브랜치가 뭐야?", "root": "repo", "expect": {"answer": "\\bmain\\b"}}

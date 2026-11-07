@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { codexIn } from "./codex-session.ts";
-const B = join(homedir(), "OpenAFM", "runtime", "bench");
+const B = join(homedir(), "OnBud", "runtime", "bench");
 const jsonl = (f: string) => readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const sub = (f: string) => new Set(JSON.parse(readFileSync(new URL(`./subsets/${f}`, import.meta.url), "utf8")).ids);
 const he = jsonl(join(B, "code/humaneval.jsonl")).filter((p) => sub("humaneval-40.json").has(p.task_id)).slice(0, 3).map((p) => p.prompt);
@@ -22,7 +22,7 @@ for (const [kind, prompts] of [["humaneval", he], ["lcb", lcb], ["bcb", bcb]] as
 }
 // Own-suite style: a document question and a small edit with tests.
 const arch = join(homedir(), "Desktop", "MyResearch", "Archive");
-for (const q of ["Top Reviewer 문서에서 편지를 발송한 주체가 누구야?", "kcc2026_final.pdf는 몇 쪽이야?"]) {
+for (const q of ["Award Letter 문서에서 편지를 발송한 주체가 누구야?", "conf2026_final.pdf는 몇 쪽이야?"]) {
   const r = await codexIn(arch, q, { title: "cost own" }); (out.own ??= []).push({ ms: r.ms, ...r.tokens }); console.log("own", Math.round(r.ms / 1000) + "s", JSON.stringify(r.tokens));
 }
 rmSync(dir, { recursive: true, force: true });

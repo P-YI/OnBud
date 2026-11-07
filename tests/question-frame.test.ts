@@ -48,3 +48,13 @@ test("intentSeeds: a named folder scopes the counts; a bare known extension befo
   assert.match(intentSeeds("How many files are there?", [], root)[0].command, /^find \. -type f/);   // no folder named
   assert.equal(intentSeeds("the files in nope 폴더 몇 개야", [], root).some((x) => x.command.includes("./nope")), false);   // not a real folder
 });
+
+test("typedCommand: a command typed as the whole message, not a sentence", async () => {
+  const { typedCommand } = await import("../services/controller/controller.ts");
+  assert.equal(typedCommand("git log --oneline -3"), "git log --oneline -3");
+  assert.equal(typedCommand("$ ls -la"), "ls -la");
+  assert.equal(typedCommand("make me a sandwich"), undefined);
+  assert.equal(typedCommand("what is git"), undefined);
+  assert.equal(typedCommand("git 로그 보여줘"), undefined);
+  assert.equal(typedCommand("zzznotacommand --x"), undefined);
+});

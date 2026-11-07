@@ -1,17 +1,17 @@
 // Long-running and interactive processes (dev servers, watchers, REPLs, long tests) in tmux, so a
 // command can outlive one chat turn and its output can be read later (Terminal-Bench style).
-//   - Own tmux server on a private socket (`tmux -L openafm`), never the user's sessions.
+//   - Own tmux server on a private socket (`tmux -L onbud`), never the user's sessions.
 //   - Session names: afm-<project hash>-<slug>, so each project sees only its own sessions.
 //   - Starting a session or typing into it needs the user's approval (it runs programs);
 //     listing, reading output and stopping our own sessions do not.
 //   - Minimal environment (no API keys), output redacted when read, at most 3 sessions per project.
-// Watch live from a terminal:  tmux -L openafm attach -t <name>
+// Watch live from a terminal:  tmux -L onbud attach -t <name>
 
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { redact } from "../security/gate.ts";
 
-const SOCKET = "openafm";
+const SOCKET = "onbud";
 const MAX_PER_PROJECT = 3;
 const ENV = ["PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", `HOME=${homedir()}`, "LANG=en_US.UTF-8", "TERM=xterm-256color", "NO_COLOR=1", "PAGER=cat", "GIT_PAGER=cat"];
 

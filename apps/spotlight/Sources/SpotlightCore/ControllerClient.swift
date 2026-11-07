@@ -1,4 +1,4 @@
-// Talks to the OpenAFM controller's OpenAI-compatible endpoint (bin/afm-agent-server.ts) on 127.0.0.1:11435.
+// Talks to the OnBud controller's OpenAI-compatible endpoint (bin/afm-agent-server.ts) on 127.0.0.1:11435.
 // The controller keeps approvals (run this command? apply this edit?) per chat, keyed by project folder and
 // first user message, so a conversation is the full message list and "yes"/"no" is just the next user turn.
 import Foundation
@@ -27,7 +27,7 @@ public enum ClientError: Error, LocalizedError, Equatable {
     case noToken, busy, unauthorized, http(Int, String)
     public var errorDescription: String? {
         switch self {
-        case .noToken: return "No token at ~/OpenAFM/config/apfel.token."
+        case .noToken: return "No token at ~/OnBud/config/apfel.token."
         case .busy: return "The AFM controller is busy with another request. Try again in a moment."
         case .unauthorized: return "The controller rejected the token (401)."
         case .http(let code, let body): return "Controller HTTP \(code): \(body.prefix(200))"
@@ -43,14 +43,14 @@ public func parseSSELine(_ line: String) -> StreamEvent? {
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let choice = (obj["choices"] as? [[String: Any]])?.first else { return nil }
     if let finish = choice["finish_reason"] as? String, !finish.isEmpty {
-        let meta = obj["openafm"] as? [String: Any]
+        let meta = obj["onbud"] as? [String: Any]
         return .done(awaiting: meta?["awaiting"] as? String)
     }
     if let delta = choice["delta"] as? [String: Any], let text = delta["content"] as? String, !text.isEmpty {
         return .text(text)
     }
-    if let step = (obj["openafm"] as? [String: Any])?["step"] as? String {
-        return .step(step, ((obj["openafm"] as? [String: Any])?["detail"] as? String) ?? "")
+    if let step = (obj["onbud"] as? [String: Any])?["step"] as? String {
+        return .step(step, ((obj["onbud"] as? [String: Any])?["detail"] as? String) ?? "")
     }
     return nil
 }
@@ -74,7 +74,7 @@ public struct ControllerClient: Sendable {
 
     /** The controller reads the project folder from an OpenCode-style "Working directory:" line. */
     public static func systemPrompt(root: String?) -> String {
-        "OpenAFM launcher.\n" + (root.map { "Working directory: \($0)\n" } ?? "")
+        "OnBud launcher.\n" + (root.map { "Working directory: \($0)\n" } ?? "")
     }
 
     public func request(messages: [ChatMessage], root: String?) throws -> URLRequest {
@@ -82,9 +82,9 @@ public struct ControllerClient: Sendable {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue(setting.rawValue, forHTTPHeaderField: "x-openafm-setting")
-        if web { req.setValue("on", forHTTPHeaderField: "x-openafm-web") }
-        if setting == .s3, let m = routerModel { req.setValue(m, forHTTPHeaderField: "x-openafm-router-model") }
+        req.setValue(setting.rawValue, forHTTPHeaderField: "x-onbud-setting")
+        if web { req.setValue("on", forHTTPHeaderField: "x-onbud-web") }
+        if setting == .s3, let m = routerModel { req.setValue(m, forHTTPHeaderField: "x-onbud-router-model") }
         let all: [[String: String]] = [["role": "system", "content": Self.systemPrompt(root: root)]]
             + messages.map { ["role": $0.role, "content": $0.content] }
         req.httpBody = try JSONSerialization.data(withJSONObject: ["model": "afm-controller", "stream": true, "messages": all])

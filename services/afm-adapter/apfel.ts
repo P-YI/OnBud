@@ -30,7 +30,7 @@ export class ApfelProvider implements AFMProvider {
     this.model = opts.model ?? "apple-foundationmodel";
     this.timeoutMs = opts.defaultTimeoutMs ?? 30_000;
     this.fetchImpl = opts.fetchImpl ?? fetch;
-    const file = opts.tokenFile ?? join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "config", "apfel.token");
+    const file = opts.tokenFile ?? join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "config", "apfel.token");
     try {
       this.token = opts.token ?? readFileSync(file, "utf8").trim();
     } catch {

@@ -9,7 +9,7 @@ import { readLog } from "../services/maintenance/housekeeping.ts";
 
 const args = process.argv.slice(2);
 const days = Number(args[args.indexOf("--days") + 1] || 7) || 7;
-const HOME = process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM");
+const HOME = process.env.ONBUD_HOME ?? join(homedir(), "OnBud");
 const since = new Date(Date.now() - days * 86_400_000).toISOString();
 const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : join(HOME, "runtime", "reports", `telemetry-${days}d-${new Date().toISOString().slice(0, 10)}.md`);
 
@@ -22,7 +22,7 @@ const table = (rows: any[], cols: string[]) =>
 
 const total = one("SELECT count(*) n FROM tasks WHERE started_at >= ?", since).n;
 const lines: string[] = [
-  `# OpenAFM telemetry — last ${days} days`,
+  `# OnBud telemetry — last ${days} days`,
   ``,
   `Generated ${new Date().toISOString()} · tasks: **${total}** · counts are per task, not per model call.`,
   ``,

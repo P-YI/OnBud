@@ -1,8 +1,8 @@
-// OpenAFM chat widget (medium, desktop or Notification Center): the last question and answer as chat bubbles
-// and an "Ask OpenAFM" box that opens the launcher panel (openafm://ask). Widgets cannot take typing, so the box
+// OnBud chat widget (medium, desktop or Notification Center): the last question and answer as chat bubbles
+// and an "Ask OnBud" box that opens the launcher panel (onbud://ask). Widgets cannot take typing, so the box
 // is a link. Content comes from the snapshot the app writes (Sources/SpotlightCore/WidgetSnapshot.swift,
 // compiled into this extension); the app reloads the widget after every answer.
-// Built by `make app` with swiftc into OpenAFM.app/Contents/PlugIns/OpenAFMWidget.appex (sandboxed).
+// Built by `make app` with swiftc into OnBud.app/Contents/PlugIns/OnBudWidget.appex (sandboxed).
 import AppKit
 import SwiftUI
 import WidgetKit
@@ -41,10 +41,10 @@ struct ChatWidgetView: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(3)
             }
             Spacer(minLength: 0)
-            Link(destination: URL(string: "openafm://ask")!) {
+            Link(destination: URL(string: "onbud://ask")!) {
                 HStack(spacing: 6) {
                     Image(systemName: "text.cursor")
-                    Text("Ask OpenAFM").lineLimit(1)
+                    Text("Ask OnBud").lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "return")
                 }
@@ -53,7 +53,7 @@ struct ChatWidgetView: View {
                 .background(.quaternary.opacity(0.7), in: Capsule())
             }
         }
-        .widgetURL(URL(string: "openafm://open")!)
+        .widgetURL(URL(string: "onbud://open")!)
     }
 
     private var header: some View {
@@ -61,7 +61,7 @@ struct ChatWidgetView: View {
             if let url = Bundle.main.url(forResource: "PanelIcon", withExtension: "png"), let img = NSImage(contentsOf: url) {
                 Image(nsImage: img).resizable().frame(width: 16, height: 16)
             }
-            Text("OpenAFM").font(.caption.weight(.semibold))
+            Text("OnBud").font(.caption.weight(.semibold))
             if let f = entry.snapshot?.folder { Text("· " + f).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength: 0)
             if let d = entry.snapshot?.date, entry.snapshot?.question.isEmpty == false {
@@ -90,13 +90,13 @@ struct ChatWidget: Widget {
         StaticConfiguration(kind: WidgetSnapshot.kind, provider: ChatProvider()) { entry in
             ChatWidgetView(entry: entry).containerBackground(.background, for: .widget)
         }
-        .configurationDisplayName("OpenAFM Chat")
-        .description("Your last question and answer, and a box that opens OpenAFM.")
+        .configurationDisplayName("OnBud Chat")
+        .description("Your last question and answer, and a box that opens OnBud.")
         .supportedFamilies([.systemMedium])
     }
 }
 
 @main
-struct OpenAFMWidgets: WidgetBundle {
+struct OnBudWidgets: WidgetBundle {
     var body: some Widget { ChatWidget() }
 }

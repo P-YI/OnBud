@@ -19,7 +19,9 @@ final class SpotlightPanel: NSPanel {
         standardWindowButton(.closeButton)?.isHidden = true
         standardWindowButton(.miniaturizeButton)?.isHidden = true
         standardWindowButton(.zoomButton)?.isHidden = true
-        isMovableByWindowBackground = true
+        // Not movable by any background drag: that turned every drag over an answer into a window move, so
+        // text could not be selected. The top row (WindowDragArea) moves the panel instead.
+        isMovableByWindowBackground = false
         hidesOnDeactivate = false
         backgroundColor = .clear
         isOpaque = false
@@ -40,6 +42,33 @@ final class SpotlightPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     override func cancelOperation(_ sender: Any?) { close() }   // Esc
+
+    /** ⌘X/C/V/A/Z and ⇧⌘Z. A menu-bar-only app has no Edit menu to carry them, and this panel does not make
+     *  the app active, so they are sent to the first responder (the text field's editor, a selected answer)
+     *  here. Keys are matched by character, or by key position when the input source is not Latin (한글). */
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown, let action = Self.editAction(event), NSApp.sendAction(action, to: nil, from: self) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    static func editAction(_ e: NSEvent) -> Selector? {
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option) else { return nil }
+        let shift = flags.contains(.shift)
+        var key = e.charactersIgnoringModifiers?.lowercased() ?? ""
+        if !(key.count == 1 && key.first!.isASCII) {
+            key = [7: "x", 8: "c", 9: "v", 0: "a", 6: "z"][Int(e.keyCode)] ?? ""   // ANSI key positions
+        }
+        switch (key, shift) {
+        case ("x", false): return #selector(NSText.cut(_:))
+        case ("c", false): return #selector(NSText.copy(_:))
+        case ("v", false): return #selector(NSText.paste(_:))
+        case ("a", false): return #selector(NSText.selectAll(_:))
+        case ("z", false): return Selector(("undo:"))
+        case ("z", true): return Selector(("redo:"))
+        default: return nil
+        }
+    }
 
     override func resignKey() {
         super.resignKey()
@@ -72,4 +101,14 @@ final class SpotlightPanel: NSPanel {
         r.origin.y = frame.maxY - r.height
         return r
     }
+}
+
+/** Behind the panel's top row: dragging there moves the panel (the text field and buttons keep their clicks). */
+struct WindowDragArea: NSViewRepresentable {
+    final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+        override var mouseDownCanMoveWindow: Bool { true }
+    }
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

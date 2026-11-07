@@ -1,11 +1,11 @@
-// Merge all benchmark results into one report: own suite, code benchmarks, BFCL, and (when present) the server
+// Merge all benchmark results into one report: own suite and code benchmarks
 // kit's open-model results. usage: node --experimental-strip-types tools/bench/report-eval.ts [--out docs/benchmark-results.md]
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const args = process.argv.slice(2);
-const B = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "bench");
+const B = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "bench");
 const OUT = args.includes("--out") ? args[args.indexOf("--out") + 1] : new URL(`../../docs/benchmark-results-${new Date().toISOString().slice(0, 10)}.md`, import.meta.url).pathname;
 const jsonl = (f: string) => readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 // prefix + timestamp only (tagged variants such as "s1-unv-…" are read separately)
@@ -98,19 +98,8 @@ for (const [tag, title] of VERS) {
   }
 }
 
-// ---------------------------------------------------------------- BFCL
-const bf = existsSync(B) ? readdirSync(B).filter((f) => /^bfcl-results-.*\.json$/.test(f)).sort().pop() : undefined;
-if (bf) {
-  const d = JSON.parse(readFileSync(join(B, bf), "utf8"));
-  const methods = [...new Set(Object.values<any>(d.summary).flatMap((x) => Object.keys(x)))];
-  lines.push("## 3. BFCL v4 (20 per category, simplified AST checker; AFM tool selection methods)", "", `| Category | ${methods.join(" | ")} |`, `|---|${methods.map(() => "---").join("|")}|`);
-  for (const [cat, m] of Object.entries<any>(d.summary)) lines.push(`| ${cat} | ${methods.map((k) => (m[k] ? `${m[k].ok}/${m[k].n}` : "–")).join(" | ")} |`);
-  lines.push(`| **Total** | ${methods.map((k) => { const ok = Object.values<any>(d.summary).reduce((n, m) => n + (m[k]?.ok ?? 0), 0); const n = Object.values<any>(d.summary).reduce((x, m) => x + (m[k]?.n ?? 0), 0); return `**${ok}/${n}**`; }).join(" | ")} |`);
-  lines.push(`| Speed · cost (s / item · cost) | ${methods.map((k) => { const ms = Object.values<any>(d.summary).reduce((n, m) => n + (m[k]?.ms ?? 0), 0); const n = Object.values<any>(d.summary).reduce((x, m) => x + (m[k]?.n ?? 0), 0); return n ? `${(ms / n / 1000).toFixed(1)} s · $0 (on-device)` : "–"; }).join(" | ")} |`, "");
-}
-
 // ---------------------------------------------------------------- comparison with open models
-lines.push("## 4. Comparison with open and on-device models (same subsets, greedy pass@1), with speed and cost", "",
+lines.push("## 3. Comparison of settings (same subsets, greedy pass@1), with speed and cost", "",
   "| Model / setting | Params | HumanEval-40 | LCB-v6-30 | BCB-Hard-stdlib-25 | Own suite | Speed (s / problem) · cost (per 100 problems) | Source |", "|---|---|---|---|---|---|---|---|");
 const pr = (s: string, b: string) => { const rs = code[b]?.[s]; return rs?.length ? pct(rs.filter((r) => r.pass).length, rs.length) : "–"; };
 const own = (s: string) => { const rs = fw[s] ?? []; return rs.length ? `${rs.filter((r) => r.pass).length}/${rs.length}` : "–"; };
@@ -131,25 +120,9 @@ for (const v of ["v3", "v4"]) for (const [k, name, params] of ROWS.slice(1, 4)) 
   const f = latest(join(B, "fw"), `results-${k}-${v}-`) ?? latest(join(B, "fw"), `results-${k}-v2-`); if (f) fw[key] = jsonl(join(B, "fw", f));
   if (BENCHES.some(([b]) => code[b]?.[key])) lines.push(`| **${name}, ${v}** | ${params} | ${pr(key, "humaneval")} | ${pr(key, "lcb")} | ${pr(key, "bcb-hard")} | ${own(key)} | ${sc(key)} | this Mac (framework ${v}) |`);
 }
-// Server rows. results/ is the fixed protocol (max_tokens 1024); results-mt4096/ is the supplementary larger budget.
-const GPU_USD_PER_H = Number(process.env.GPU_USD_PER_HOUR ?? 2.0);   // rental price assumption for the server column
-const serverRows = (dir: string, note: string) => {
-  const SV = join(B, "server", dir);
-  const ms = existsSync(SV) ? readdirSync(SV).filter((m) => existsSync(join(SV, m, "summary.json"))).sort() : [];
-  for (const m of ms) {
-    const x = JSON.parse(readFileSync(join(SV, m, "summary.json"), "utf8"));
-    const n = ["humaneval", "lcb", "bcb"].reduce((a, k) => a + (x[k]?.n ?? 0), 0), secs = ["humaneval", "lcb", "bcb"].reduce((a, k) => a + (x[k]?.gen_seconds ?? 0), 0);
-    const cell = (k: string) => (x[k] ? `${x[k]["pass@1"]}%${x[k].truncated ? ` (cut ${x[k].truncated_pct}%)` : ""}` : "–");
-    lines.push(`| ${x.model}${note} | – | ${["humaneval", "lcb", "bcb"].map(cell).join(" | ")} | – | ${n ? `${(secs / n).toFixed(1)} s · ${usd((100 * secs * GPU_USD_PER_H) / 3600 / n)} (GPU at $${GPU_USD_PER_H}/h, sequential)` : "–"} | server vLLM (${x.date}) |`);
-  }
-  return ms.length;
-};
-const server = serverRows("results", "");
-serverRows("results-mt4096", " · max_tokens 4096 (supplementary)");
-if (!server) lines.push("| Open models (models.txt) | 1.5–7B | pending | pending | pending | – | GPU time × rental price (server kit) | run `tools/bench/server/run.sh` |");
-lines.push("", `_Cost: Codex runs on the ChatGPT Pro subscription (no per-token bill). The column prices each Codex call at GPT-6.1 Sol standard API rates ($${PRICE.input}/1M input, $${PRICE.cached}/1M cached input, $${PRICE.output}/1M output and reasoning) with tokens measured per benchmark type (${Object.entries(perCall).map(([k, v]) => `${k} ${usd(v)}/call`).join(", ")}). On-device AFM and Decima have no per-token cost (only the Mac's power).${server ? "" : " Server rows use GPU time × an assumed rental price (GPU_USD_PER_HOUR, default $2/h)."}${server ? ` Server rows: one request at a time through an SSH tunnel, so seconds include network latency; cost = generation time × $${GPU_USD_PER_H}/h (assumed rental price). "cut" = replies stopped at max_tokens (counted as generated, usually failing).` : ""}_`);
+lines.push("", `_Cost: Codex runs on the ChatGPT Pro subscription (no per-token bill). The column prices each Codex call at GPT-6.1 Sol standard API rates ($${PRICE.input}/1M input, $${PRICE.cached}/1M cached input, $${PRICE.output}/1M output and reasoning) with tokens measured per benchmark type (${Object.entries(perCall).map(([k, v]) => `${k} ${usd(v)}/call`).join(", ")}). On-device AFM and Decima have no per-token cost (only the Mac's power)._`);
 lines.push("", "Published full-benchmark figures, for orientation only (different protocol and windows): Qwen2.5-Coder-1.5B-Instruct HumanEval 70.7, LCB 14.6; Qwen2.5-Coder-7B-Instruct HumanEval 88.4, LCB 32.3 (OpenCodeInstruct, arXiv 2504.04030, Table 3). Apple publishes no coding benchmark for the on-device model.", "");
-lines.push("_Caveats: small fixed subsets (direction, not significance); S2/S3/S1 self-check against examples in the problem text, never hidden tests; Codex runs are single attempts through OpenCode; BFCL uses a simplified checker._");
+lines.push("_Caveats: small fixed subsets (direction, not significance); S2/S3/S1 self-check against examples in the problem text, never hidden tests; Codex runs are single attempts through OpenCode._");
 // Written analysis (kept in its own file so regenerating the tables does not lose it).
 const NOTES = new URL("../../docs/benchmark-notes.md", import.meta.url).pathname;
 if (existsSync(NOTES)) lines.push("", readFileSync(NOTES, "utf8").trim());

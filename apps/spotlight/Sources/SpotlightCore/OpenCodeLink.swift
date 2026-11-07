@@ -1,4 +1,4 @@
-// Opt-in "Link OpenCode": merges OpenAFM's provider, agent and MCP entries into the global OpenCode config,
+// Opt-in "Link OpenCode": merges OnBud's provider, agent and MCP entries into the global OpenCode config,
 // so the OpenCode CLI and desktop app get the AFM agent and the codex agent. Never overwrites a key the user has,
 // does nothing when the config is already the repo's file (symlink) or already has the entries, and backs up
 // before writing. The app shows the diff first; writing happens only on the user's click.
@@ -8,14 +8,14 @@ public enum LinkState: Equatable, Sendable {
     case symlinkedToRepo(String)       // config is a symlink to opencode/opencode.global.jsonc → nothing to do
     case alreadyLinked                 // config already contains every entry
     case needsMerge(LinkPlan)
-    case sourceMissing                 // no ~/OpenAFM checkout to merge from
+    case sourceMissing                 // no ~/OnBud checkout to merge from
     case unreadable(String)            // config exists but does not parse; we do not touch it
 }
 
 public struct LinkPlan: Equatable, Sendable {
     public let target: URL
     public let targetExists: Bool
-    public let added: [String]         // e.g. "provider.afm-agent", "agent.codex", "mcp.openafm"
+    public let added: [String]         // e.g. "provider.afm-agent", "agent.codex", "mcp.onbud"
     public let before: String
     public let after: String
 }
@@ -26,7 +26,7 @@ public struct OpenCodeLink: Sendable {
     /** Top-level sections whose entries are merged key by key. */
     public static let sections = ["provider", "agent", "mcp"]
 
-    public init(configDir: URL? = nil, source: URL = OpenAFMPaths().globalOpenCodeSource) {
+    public init(configDir: URL? = nil, source: URL = OnBudPaths().globalOpenCodeSource) {
         if let configDir { self.configDir = configDir }
         else {
             let xdg = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : $0 }
@@ -77,6 +77,12 @@ public struct OpenCodeLink: Sendable {
             var have = out[section] ?? .object([])
             guard case .object = have else { continue }       // user has something odd there; leave it
             for (k, v) in entries where have[k] == nil { have.set(k, v); added.append("\(section).\(k)") }
+            // v0.1.0 registered the same MCP server as "openafm"; the "onbud" entry replaces it.
+            if section == "mcp", case .object(let kv) = have, entries.contains(where: { $0.0 == "onbud" }),
+               kv.contains(where: { $0.0 == LegacyMigration.oldMCPName }) {
+                have = .object(kv.filter { $0.0 != LegacyMigration.oldMCPName })
+                added.append("removed mcp.\(LegacyMigration.oldMCPName) (the v0.1.0 name)")
+            }
             if out[section] != have { out.set(section, have) }
         }
         if case .array(var enabled)? = out["enabled_providers"], case .object(let providers)? = src["provider"] {

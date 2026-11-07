@@ -1,0 +1,56 @@
+{
+  "id": "files",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Finding files and folders on this Mac (name and content), folder overviews, questions about documents, spreadsheets and slides, action-item tables, CSV to JSON.",
+  "examples": [
+    "Find the research paper PDF about Sparse Attention",
+    "conf2026_final.pdf는 몇 쪽이야?",
+    "이 폴더에 어떤 문서가 있어?"
+  ],
+  "reasonCodes": [
+    "local_document_overview",
+    "local_document_question",
+    "local_find_files",
+    "find_needs_name",
+    "local_sheet_lookup",
+    "local_slides_outline",
+    "local_extract_table",
+    "local_csv_json"
+  ],
+  "capabilities": [
+    "read",
+    "propose"
+  ],
+  "lane": "contained",
+  "egress": "none",
+  "checks": [
+    "results_exist",
+    "results_match_topic",
+    "reply_language",
+    "quotes_in_evidence"
+  ],
+  "budget": {
+    "afmCalls": 4,
+    "latencyMs": 45000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "sheet_lookup": [
+      "Look up the price of item B-12 in parts.xlsx",
+      "budget.csv에서 3월 식비가 얼마야?"
+    ],
+    "slides_outline": [
+      "List the slide titles in deck.pptx",
+      "발표자료 3번째 슬라이드 내용 알려줘"
+    ],
+    "extract_table": [
+      "Make a table of action items and owners from the meeting notes",
+      "회의록에서 할 일과 담당자를 표로 정리해줘"
+    ],
+    "csv_json": [
+      "Convert data.csv to JSON",
+      "results.csv를 json으로 바꿔줘"
+    ]
+  }
+}

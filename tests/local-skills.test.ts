@@ -147,14 +147,16 @@ test("detectLocalSkill: Mac health check, Korean and English; not a how-to", () 
 });
 
 test("open_app: terminal and editor requests detected; named apps found; questions are not actions", async () => {
-  const { appInRequest, chooseApp } = await import("../services/context-builder/apps.ts");
+  const { appInRequest, chooseApp, findApp } = await import("../services/context-builder/apps.ts");
   assert.equal(detectLocalSkill("터미널 열어줘", []), "open_app");
   assert.equal(detectLocalSkill("iTerm으로 이 폴더 열어줘", []), "open_app");
   assert.equal(detectLocalSkill("open a terminal here", []), "open_app");
   assert.equal(detectLocalSkill("백그라운드 세션을 터미널에서 열어줘", []), "open_app");
   assert.equal(detectLocalSkill("README.md를 VS Code로 열어줘", [{ path: "README.md" }]), "open_app");
   assert.equal(detectLocalSkill("터미널에서 git log 보는 법 알려줘", []), undefined);
-  assert.match(appInRequest("iTerm으로 열어줘") ?? "", /iTerm/);
+  // whichever named terminal this Mac has (iTerm was replaced by Ghostty on the dev Mac)
+  const named = ["iTerm", "Ghostty", "Warp"].find((n) => findApp(n));
+  if (named) assert.match(appInRequest(`${named}으로 열어줘`) ?? "", new RegExp(named));
   assert.equal(appInRequest("터미널 열어줘"), undefined);   // the generic word follows the default
   assert.match((await chooseApp("terminal", "터미널 열어줘"))?.app ?? "", /\.app$/);
 });
@@ -189,4 +191,53 @@ test("security_check: real secrets with git state, placeholders and ignored file
   assert.equal(by("src/conf.py:3") ?? by("src/conf.py:4") ?? by("README.md:1"), undefined);   // placeholders
   assert.ok(f.every((x) => !/Xk9#mQ2v|AKIAQ3EG|Zt8Qw3/.test(x.what)));   // values masked
   assert.ok(placeholder("assignment", "${DB_PASS}") && !placeholder("assignment", "Xk9#mQ2vL!pR7zW4"));
+});
+
+test("launch_app: app names from requests; commands, files and folders are not apps; name scoring", async () => {
+  const { launchTarget } = await import("../services/controller/local-skills.ts");
+  const { appScore } = await import("../services/context-builder/apps.ts");
+  assert.deepEqual(launchTarget("logi option 앱 열어줘"), { name: "logi option", explicit: true });
+  assert.deepEqual(launchTarget("카카오톡 열어줘"), { name: "카카오톡", explicit: false });
+  assert.deepEqual(launchTarget("Open the Logi Options app"), { name: "Logi Options", explicit: true });
+  assert.equal(launchTarget("run npm test"), undefined);
+  assert.equal(launchTarget("README.md 열어줘"), undefined);
+  assert.equal(launchTarget("docs 폴더 열어줘"), undefined);
+  assert.equal(detectLocalSkill("터미널 열어줘", []), "open_app");
+  const app = (name: string, file: string, path = `/Applications/${file}.app`) => ({ name, file, path });
+  assert.ok(appScore("logi option", app("Logi Options+", "logioptionsplus")) >= 80);
+  assert.ok(appScore("chrome", app("Google Chrome", "Google Chrome")) - appScore("chrome", app("Chrome 원격 데스크톱", "Chrome Remote Desktop")) >= 5);
+  assert.ok(appScore("크롬", app("Google Chrome", "Google Chrome")) >= 80);
+  assert.equal(appScore("calculator", app("계산기", "Calculator", "/System/Applications/Calculator.app")), 101);
+  assert.ok(appScore("notes", app("Logic Pro", "Logic Pro")) < 70);
+});
+
+test("terminalFolder: home, known folders, explicit paths, named folders; the project only when none is named", async () => {
+  const { mkdtempSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { terminalFolder } = await import("../services/controller/local-skills.ts");
+  const H = process.env.HOME!;
+  const root = mkdtempSync(join(H, ".onbud-test-")); mkdirSync(join(root, "docs"));
+  try {
+    assert.deepEqual(await terminalFolder("home 디렉토리를 터미널에서 열어줘", root), { dir: H });
+    assert.deepEqual(await terminalFolder("open a terminal in my home folder", root), { dir: H });
+    assert.deepEqual(await terminalFolder("이 폴더에서 터미널 열어줘", root), { dir: root });
+    assert.deepEqual(await terminalFolder("docs 폴더에서 터미널 열어줘", root), { dir: join(root, "docs") });
+    assert.deepEqual(await terminalFolder(`${root}/docs 에서 터미널 열어줘`, root), { dir: join(root, "docs") });
+    assert.deepEqual(await terminalFolder("터미널 열어줘", root), {});
+    // nested: the named folder inside the folder mentioned with it, with Korean particles attached
+    mkdirSync(join(root, "docs", "Orion", "src", "orion"), { recursive: true });
+    assert.deepEqual(await terminalFolder("docs 폴더 안의 Orion 디렉토리에 터미널 열어줘", root), { dir: join(root, "docs", "Orion") });
+    assert.deepEqual(await terminalFolder("orion 디렉토리를 터미널로 열어줘", root), { dir: join(root, "docs", "Orion") });
+    assert.deepEqual(await terminalFolder("docs/Orion에서 터미널 열어줘", root), { dir: join(root, "docs", "Orion") });
+    assert.deepEqual(await terminalFolder("docs 폴더 안의 ZZZ 디렉토리에 터미널 열어줘", root), { missing: { name: "ZZZ", in: join(root, "docs") } });
+    assert.deepEqual(await terminalFolder(`${tmpdir()} 에서 터미널 열어줘`, root), {});   // outside home: not used
+  } finally { (await import("node:fs")).rmSync(root, { recursive: true, force: true }); }
+});
+
+test("copilot: usage questions and hand-offs to VS Code are detected; how-to questions are not", () => {
+  assert.equal(detectLocalSkill("copilot 크레딧 얼마 남았어?", []), "copilot");
+  assert.equal(detectLocalSkill("이 버그 수정을 copilot에게 보내줘", []), "copilot");
+  assert.equal(detectLocalSkill("send this to copilot", []), "copilot");
+  assert.equal(detectLocalSkill("copilot 설정 방법 알려줘", []), undefined);
 });

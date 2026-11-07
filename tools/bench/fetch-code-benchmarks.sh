@@ -7,7 +7,7 @@
 #               are accepted (checked with pickletools before loading).
 # usage: tools/bench/fetch-code-benchmarks.sh [humaneval|bcb-hard|lcb|all]
 set -eu
-D="${OPENAFM_HOME:-$HOME/OpenAFM}/runtime/bench/code"; mkdir -p "$D"
+D="${ONBUD_HOME:-$HOME/OnBud}/runtime/bench/code"; mkdir -p "$D"
 what="${1:-all}"
 if [ "$what" = humaneval ] || [ "$what" = all ]; then
   curl -fsSL https://github.com/openai/human-eval/raw/master/data/HumanEval.jsonl.gz | gunzip > "$D/humaneval.jsonl"

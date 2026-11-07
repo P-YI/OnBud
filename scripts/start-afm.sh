@@ -3,11 +3,11 @@
 # Prefer scripts/afm-launchagent.sh install for a login-time service.
 set -eu
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-OPENAFM_HOME="${OPENAFM_HOME:-$(dirname "$REPO")}"
+REPO="$(cd "$(dirname "$0")/.." && pwd -P)"   # real path, also when run through the ~/OnBud link
+ONBUD_HOME="${ONBUD_HOME:-$(dirname "$REPO")}"
 AFM_PORT="${AFM_PORT:-11434}"
-PIDFILE="$OPENAFM_HOME/runtime/apfel.pid"
-LOG="$OPENAFM_HOME/runtime/logs/apfel-serve.log"
+PIDFILE="$ONBUD_HOME/runtime/apfel.pid"
+LOG="$ONBUD_HOME/runtime/logs/apfel-serve.log"
 
 if curl -s -m 1 "http://127.0.0.1:$AFM_PORT/health" >/dev/null 2>&1; then
   echo "apfel already serving on 127.0.0.1:$AFM_PORT"; exit 0
@@ -16,7 +16,7 @@ if lsof -nP -iTCP:"$AFM_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "port $AFM_PORT is taken by another process; set AFM_PORT" >&2; exit 1
 fi
 
-OPENAFM_HOME="$OPENAFM_HOME" nohup "$REPO/scripts/apfel-run.sh" >>"$LOG" 2>&1 &
+ONBUD_HOME="$ONBUD_HOME" nohup "$REPO/scripts/apfel-run.sh" >>"$LOG" 2>&1 &
 echo $! >"$PIDFILE"
 
 for _ in $(seq 1 20); do

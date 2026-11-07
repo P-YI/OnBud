@@ -1,4 +1,4 @@
-// Smoke checks for the OpenAFM launcher (the Command Line Tools have no XCTest):
+// Smoke checks for the OnBud launcher (the Command Line Tools have no XCTest):
 //   1. core: SSE parsing, meta split, JSONC, OpenCode merge/symlink detection/backup (temp dirs only)
 //   2. live: the panel's own request path against the running controller, own-suite style —
 //      document question, terminal command with approve and deny, small edit (trial → apply → tests).
@@ -23,7 +23,7 @@ check("SSE: content delta", parseSSELine(#"data: {"choices":[{"index":0,"delta":
 check("SSE: keep-alive ignored", parseSSELine(": working") == nil)
 check("SSE: [DONE] ignored", parseSSELine("data: [DONE]") == nil)
 check("SSE: final chunk carries awaiting",
-      parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"openafm":{"setting":"s2","awaiting":"command"}}"#) == .done(awaiting: "command"))
+      parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"onbud":{"setting":"s2","awaiting":"command"}}"#) == .done(awaiting: "command"))
 check("SSE: final chunk without metadata", parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#) == .done(awaiting: nil))
 let sm = splitMeta("Answer.\n\n— AFM controller · LOCAL_AFM · ok · 1.0s")
 check("meta split", sm.body == "Answer." && sm.meta == "AFM controller · LOCAL_AFM · ok · 1.0s")
@@ -38,10 +38,14 @@ let home = FileManager.default.homeDirectoryForCurrentUser.path
 check("folder guard: Desktop allowed", ProjectFolder.problem(home + "/Desktop") == nil)
 check("folder guard: home, ~/.ssh, ~/Library, /tmp refused",
       [home, home + "/.ssh", home + "/Library/Keychains", "/tmp"].allSatisfy { ProjectFolder.problem($0) != nil })
-let script = OpenCodeHandoff.cliScript(cli: "/x/opencode", dir: "/a b", prompt: "it's $(rm -rf ~) `x`")
-check("CLI hand-off script quotes the request", script.contains(#"--prompt 'it'\''s $(rm -rf ~) `x`'"#) && script.contains("cd '/a b'"))
+let script = OpenCodeHandoff.runScript(cli: "/x/opencode", dir: "/a b", prompt: "it's $(rm -rf ~) `x`")
+check("CLI hand-off (opencode run fallback) quotes the request, on the codex agent",
+      script.contains(#"run --agent codex --title 'OnBud hand-off' 'it'\''s $(rm -rf ~) `x`'"#) && script.contains("cd '/a b'"))
+let tui = OpenCodeHandoff.sessionScript(cli: "/x/opencode", dir: "/a b", session: "ses_abc123def456")
+check("CLI hand-off opens the OpenCode 2 TUI on the session (no --agent)",
+      tui.contains("'/x/opencode' '/a b' --session 'ses_abc123def456'") && !tui.contains("--agent"))
 
-check("SSE: step event", parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":null}],"openafm":{"step":"seed","detail":"1 blocks"}}"#) == .step("seed", "1 blocks"))
+check("SSE: step event", parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":null}],"onbud":{"step":"seed","detail":"1 blocks"}}"#) == .step("seed", "1 blocks"))
 check("step label", StepLabel.text("seed", "") == "Searching the folder…")
 check("attachments: files relative to root, text quoted",
       Attachments.compose("Q", [.file(URL(fileURLWithPath: "/r/a/b.pdf")), .text("hello", source: "clipboard")], root: "/r")
@@ -50,13 +54,13 @@ check("attachments: outside files → their common folder",
       Attachments.root(for: [URL(fileURLWithPath: "/x/p/a.pdf"), URL(fileURLWithPath: "/x/q/b.pdf")], current: "/r") == "/x")
 check("attachments: long text truncated", Attachments.compose("Q", [.text(String(repeating: "x", count: 9000), source: "s")], root: nil).count < 4200)
 check("recent folders: dedupe, newest first, max 6", RecentFolders.updated(["a", "b", "c", "d", "e", "f"], adding: "c") == ["c", "a", "b", "d", "e", "f"])
-let hs = HistoryStore(file: FileManager.default.temporaryDirectory.appendingPathComponent("openafm-smoke-\(UUID().uuidString)/history.json"))
+let hs = HistoryStore(file: FileManager.default.temporaryDirectory.appendingPathComponent("onbud-smoke-\(UUID().uuidString)/history.json"))
 let chat = SavedChat(root: "/r", messages: [ChatMessage(role: "user", content: "hi"), ChatMessage(role: "assistant", content: "yo")])
 hs.save(chat); var chat2 = chat; chat2.messages.append(ChatMessage(role: "user", content: "more")); hs.save(chat2)
 let mode = ((try? FileManager.default.attributesOfItem(atPath: hs.file.path))?[.posixPermissions] as? NSNumber)?.intValue ?? 0
 check("history: replace by id, owner-only file", hs.load().count == 1 && hs.load()[0].messages.count == 3 && mode == 0o600)
 hs.clear(); try? FileManager.default.removeItem(at: hs.file.deletingLastPathComponent())
-let tmpProj = FileManager.default.temporaryDirectory.appendingPathComponent("openafm-qa-\(UUID().uuidString.prefix(6))")
+let tmpProj = FileManager.default.temporaryDirectory.appendingPathComponent("onbud-qa-\(UUID().uuidString.prefix(6))")
 try? FileManager.default.createDirectory(at: tmpProj.appendingPathComponent(".git"), withIntermediateDirectories: true)
 try? "x".write(to: tmpProj.appendingPathComponent("main.tex"), atomically: true, encoding: .utf8)
 let qa = QuickActions.suggest(root: tmpProj.path, latex: true).map(\.title)
@@ -88,10 +92,52 @@ if let setup = try? String(contentsOf: repoRoot.appendingPathComponent("scripts/
    let p = RouterPin.parse(policy) {
     check("decima-setup.sh pulls the pinned decima:agent digest", setup.contains("sha256:" + p.digestPrefix))
 } else { check("decima-setup.sh pulls the pinned decima:agent digest", false, "files not found under \(repoRoot.path)") }
+// JSONC in-place edits keep comments and touch only the edited values.
+let jt = "{\n  // keep me\n  \"agent\": {\n    \"codex\": { \"model\": \"openai/a\", \"variant\": \"medium\" }, // trailing\n    \"codex-solve\": {\n      \"mode\": \"primary\"\n    }\n  }\n}\n"
+if let e1 = try? FrontierAgents.apply(jt, model: "anthropic/claude-x", variant: nil) {
+    check("jsonc edit: model set, variant removed, missing key inserted, comments kept",
+          e1.contains("// keep me") && e1.contains("// trailing") && !e1.contains("variant")
+          && FrontierAgents.current(e1).model == "anthropic/claude-x" && JSONCEdit.string(e1, ["agent", "codex-solve", "model"]) == "anthropic/claude-x"
+          && JSONCEdit.string(e1, ["agent", "codex-solve", "mode"]) == "primary", e1)
+} else { check("jsonc edit: model set, variant removed, missing key inserted, comments kept", false) }
+let realCfg = repoRoot.appendingPathComponent("opencode/opencode.global.jsonc")
+if let cfg = try? String(contentsOf: realCfg, encoding: .utf8), let e2 = try? FrontierAgents.apply(cfg, model: "openai/test-model", variant: "high") {
+    let before = cfg.components(separatedBy: "\n"), after = e2.components(separatedBy: "\n")
+    let changed = zip(before, after).filter { $0 != $1 }.map(\.1)
+    check("jsonc edit on the repo's OpenCode config: only model/variant lines change",
+          before.count == after.count && !changed.isEmpty && changed.allSatisfy { $0.contains("\"model\": \"openai/test-model\"") || $0.contains("\"variant\": \"high\"") }
+          && FrontierAgents.current(e2).present == FrontierAgents.agents, changed.joined(separator: " | "))
+} else { check("jsonc edit on the repo's OpenCode config: only model/variant lines change", false) }
+if let cfg = try? String(contentsOf: realCfg, encoding: .utf8), let e3 = try? FrontierAgents.apply(cfg, model: "openai/test-cheap", variant: nil, tier: .cheap) {
+    check("cheap tier: only codex-solve-cheap changes; defaults Terra (cheap) and Sol (strong)",
+          FrontierAgents.current(cfg, tier: .cheap).model == FrontierAgents.Tier.cheap.defaultModel
+          && FrontierAgents.current(cfg).model == FrontierAgents.Tier.strong.defaultModel
+          && JSONCEdit.string(e3, ["agent", "codex-solve-cheap", "model"]) == "openai/test-cheap"
+          && JSONCEdit.string(e3, ["agent", "codex-solve-cheap", "variant"]) == nil
+          && FrontierAgents.current(e3).model == FrontierAgents.current(cfg).model)
+} else { check("cheap tier: only codex-solve-cheap changes; defaults Terra (cheap) and Sol (strong)", false) }
+check("cheap tier missing → a clear error, config untouched", (try? FrontierAgents.apply(jt, model: "x/y", variant: nil, tier: .cheap)) == nil)
+check("opencode models / auth list parsed",
+      FrontierAgents.parseModels("opencode/big-pickle\nafm/apple-foundationmodel\nopenai/gpt-6.1-sol\nanthropic/claude-x\n") == ["opencode": ["opencode/big-pickle"], "openai": ["openai/gpt-6.1-sol"], "anthropic": ["anthropic/claude-x"]]
+      && FrontierAgents.parseAuth("\u{1B}[0m\n┌  Credentials\n│\n●  OpenAI \u{1B}[90moauth\n●  Anthropic \u{1B}[90mapi\n└  2 credentials") == ["OpenAI", "Anthropic"]
+      && FrontierAgents.parseAuth("OpenAI  OAuth                       stored\nGitHub Copilot  OAuth  stored\n") == ["OpenAI", "GitHub Copilot"])
+// GitHub Copilot tier: status/sign-in output, quota, and the one-line copilot_mode edit.
+check("copilot: status and device code parsed (github.com only)",
+      Copilot.parseStatus("x\nstatus: OK P-YI\n")! == ("OK", "P-YI") && Copilot.parseStatus("status: NotSignedIn ")!.status == "NotSignedIn"
+      && Copilot.parseDeviceCode("Open https://github.com/login/device and enter the code: AB12-CD34")?.code == "AB12-CD34"
+      && Copilot.parseDeviceCode("Open https://evil.example/login and enter the code: AB12-CD34") == nil)
+let cq = Copilot.parseQuota(#"{"copilot_plan":"individual","quota_reset_date":"2026-12-01","quota_snapshots":{"completions":{"unlimited":true},"premium_interactions":{"unlimited":false,"quota_remaining":198.8,"percent_remaining":99.4}}}"#.data(using: .utf8)!)
+check("copilot: quota line", cq?.completionsUnlimited == true && cq?.premiumRemaining == 198.8 && cq?.summary.contains("premium requests 199 left") == true, cq?.summary ?? "")
+if let pol = try? String(contentsOf: repoRoot.appendingPathComponent("policies/routing.yaml"), encoding: .utf8), let saver = CopilotMode.write(pol, .saver) {
+    let diffLines = zip(pol.components(separatedBy: "\n"), saver.components(separatedBy: "\n")).filter { $0 != $1 }
+    check("copilot_mode: only that line changes in the repo's routing.yaml",
+          CopilotMode.read(saver) == .saver && diffLines.count == 1 && diffLines[0].1.trimmingCharacters(in: .whitespaces) == "copilot_mode: saver"
+          && CopilotMode.write(saver, .balanced) == pol || CopilotMode.read(pol) == .saver, diffLines.map(\.1).joined())
+} else { check("copilot_mode: only that line changes in the repo's routing.yaml", false, "no copilot_mode line") }
 check("client: router model header only with the router setting",
-      (try? ControllerClient(token: "t", setting: .s3, routerModel: "decima:agent").request(messages: [], root: nil).value(forHTTPHeaderField: "x-openafm-router-model")) == "decima:agent"
-      && (try? ControllerClient(token: "t", setting: .s2, routerModel: "decima:agent").request(messages: [], root: nil).value(forHTTPHeaderField: "x-openafm-router-model")) == .some(nil))
-let wsFile = FileManager.default.temporaryDirectory.appendingPathComponent("openafm-widget-\(UUID().uuidString.prefix(6))/snapshot.json")
+      (try? ControllerClient(token: "t", setting: .s3, routerModel: "decima:agent").request(messages: [], root: nil).value(forHTTPHeaderField: "x-onbud-router-model")) == "decima:agent"
+      && (try? ControllerClient(token: "t", setting: .s2, routerModel: "decima:agent").request(messages: [], root: nil).value(forHTTPHeaderField: "x-onbud-router-model")) == .some(nil))
+let wsFile = FileManager.default.temporaryDirectory.appendingPathComponent("onbud-widget-\(UUID().uuidString.prefix(6))/snapshot.json")
 WidgetSnapshot(question: "Q", answer: String(repeating: "a", count: 900), folder: "Desktop").save(to: wsFile)
 let wsMode = ((try? FileManager.default.attributesOfItem(atPath: wsFile.path))?[.posixPermissions] as? NSNumber)?.intValue ?? 0
 check("widget snapshot: round trip, shortened, owner-only", WidgetSnapshot.load(from: wsFile)?.answer.count == WidgetSnapshot.maxAnswer + 1 && wsMode == 0o600)
@@ -109,17 +155,17 @@ check("markdown: heading, table (escaped pipe, short row padded), lists, code, q
     .code(lang: "sh", text: "ls"), .quote("note"), .paragraph("text"),
 ], "\(md)")
 
-let paths = OpenAFMPaths()
+let paths = OnBudPaths()
 let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("afm-spotlight-smoke-\(UUID().uuidString.prefix(8))")
 try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
 defer { if !keep { try? FileManager.default.removeItem(at: tmp) } }
 
 if let srcText = try? String(contentsOf: paths.globalOpenCodeSource, encoding: .utf8), let src = try? JSONC.parse(srcText) {
-    check("repo opencode.global.jsonc parses", src["provider"]?["afm-agent"] != nil && src["mcp"]?["openafm"] != nil)
+    check("repo opencode.global.jsonc parses", src["provider"]?["afm-agent"] != nil && src["mcp"]?["onbud"] != nil)
     // a) fresh config dir → creates opencode.json with everything
     let fresh = OpenCodeLink(configDir: tmp.appendingPathComponent("fresh"), source: paths.globalOpenCodeSource)
     if case .needsMerge(let plan) = fresh.inspect() {
-        check("link: empty config needs merge", plan.added.contains("provider.afm-agent") && plan.added.contains("agent.codex") && plan.added.contains("mcp.openafm"))
+        check("link: empty config needs merge", plan.added.contains("provider.afm-agent") && plan.added.contains("agent.codex") && plan.added.contains("mcp.onbud"))
         let backup = try? fresh.apply(plan)
         check("link: write without backup for a new file", backup == nil && FileManager.default.fileExists(atPath: plan.target.path))
         check("link: second inspect is a no-op", fresh.inspect() == .alreadyLinked)
@@ -149,6 +195,63 @@ if let srcText = try? String(contentsOf: paths.globalOpenCodeSource, encoding: .
 } else {
     print("skip  OpenCode merge checks (no \(paths.globalOpenCodeSource.path))")
 }
+
+// Skills switches (config/skills.json): defaults, toggles, unknown keys kept, atomic write with mode 600.
+do {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("afm-skills-\(UUID().uuidString)")
+    let f = dir.appendingPathComponent("config/skills.json")
+    var s = SkillSettings.load(from: f)
+    check("skills: defaults (web on, personal off, core on, convert 500 MB)",
+          s.isOn("web") && !s.isOn("personal") && s.isOn("core") && s.convertMaxMB == 500)
+    s.raw["future"] = ["x": 1]
+    s.set("web", on: false); s.set("personal", on: true); s.set("core", on: false); s.convertMaxMB = 200
+    try s.save(to: f)
+    let back = SkillSettings.load(from: f)
+    let mode = (try? FileManager.default.attributesOfItem(atPath: f.path)[.posixPermissions] as? Int) ?? 0
+    check("skills: saved toggles, maxMB and unknown keys; mode 600",
+          !back.isOn("web") && back.isOn("personal") && back.isOn("core") && back.convertMaxMB == 200
+          && (back.raw["future"] as? [String: Int]) == ["x": 1] && (back.raw["disabled"] as? [String]) == ["web"]
+          && (back.raw["enabled"] as? [String]) == ["personal"] && mode == 0o600, "\(back.raw) mode \(String(mode, radix: 8))")
+    var t = back; t.set("web", on: true); t.set("personal", on: false)
+    check("skills: turning back on/off clears the lists", t.raw["disabled"] == nil && t.raw["enabled"] == nil && !t.isOn("personal"))
+    let infos = Skills.manifests(OnBudPaths(home: repoRoot.deletingLastPathComponent()))
+    check("skills: all 13 manifests have a description", infos.count == 13 && infos.allSatisfy { !$0.description.isEmpty }, "\(infos.map(\.id))")
+    let unknown = infos.flatMap { i in i.capabilities.filter { SkillCatalog.capability($0).symbol == "questionmark.circle" } + [i.lane].filter { SkillCatalog.lane($0).detail.isEmpty } + [i.egress].filter { SkillCatalog.egress($0).detail.isEmpty } }
+    check("skills: every capability, lane and egress has a label", unknown.isEmpty, "\(unknown)")
+    check("skills: personal is private, web sends a query", infos.first { $0.id == "personal" }?.isPrivate == true && infos.first { $0.id == "web" }?.egress == "query")
+    try? FileManager.default.removeItem(at: dir)
+} catch { check("skills: save", false, "\(error)") }
+
+// Upgrade from v0.1.0 (OpenAFM): link, folded early logs, moved Application Support; a second run does nothing.
+do {
+    let fm = FileManager.default
+    let h = fm.temporaryDirectory.appendingPathComponent("onbud-legacy-\(UUID().uuidString.prefix(6))")
+    let old = h.appendingPathComponent(LegacyMigration.oldName), new = h.appendingPathComponent("OnBud")
+    let sup = h.appendingPathComponent("Library/Application Support")
+    for d in [old.appendingPathComponent("config"), old.appendingPathComponent("runtime/logs"), new.appendingPathComponent("runtime/logs"),
+              sup.appendingPathComponent(LegacyMigration.oldName)] { try fm.createDirectory(at: d, withIntermediateDirectories: true) }
+    try "a\n".write(to: old.appendingPathComponent("runtime/logs/gate.jsonl"), atomically: true, encoding: .utf8)
+    try "b\n".write(to: new.appendingPathComponent("runtime/logs/gate.jsonl"), atomically: true, encoding: .utf8)
+    try "[]".write(to: sup.appendingPathComponent("\(LegacyMigration.oldName)/history.json"), atomically: true, encoding: .utf8)
+    let first = LegacyMigration.run(home: h, environment: [:], defaults: nil)
+    let log = try? String(contentsOf: new.appendingPathComponent("runtime/logs/gate.jsonl"), encoding: .utf8)
+    check("upgrade: ~/OnBud links to the old folder, early logs folded in",
+          (try? fm.destinationOfSymbolicLink(atPath: new.path)) == old.path && log == "a\nb\n", "\(first) \(log ?? "nil")")
+    check("upgrade: Application Support moved", fm.fileExists(atPath: sup.appendingPathComponent("OnBud/history.json").path)
+          && !fm.fileExists(atPath: sup.appendingPathComponent(LegacyMigration.oldName).path))
+    check("upgrade: a second run changes nothing; ONBUD_HOME skips the link",
+          LegacyMigration.run(home: h, environment: [:], defaults: nil).isEmpty
+          && LegacyMigration.run(home: h.appendingPathComponent("none"), environment: ["ONBUD_HOME": "/x"], defaults: nil).isEmpty)
+    try? fm.removeItem(at: h)
+} catch { check("upgrade: setup", false, "\(error)") }
+
+do {
+    let src = try JSONC.parse(#"{"mcp":{"onbud":{"type":"local"}}}"#)
+    let user = try JSONC.parse(#"{"mcp":{"openafm":{"type":"local"},"other":{"type":"remote"}}}"#)
+    let (m, added) = OpenCodeLink.merge(user, from: src)
+    check("upgrade: the config link replaces the v0.1.0 MCP entry, keeps others",
+          m["mcp"]?["onbud"] != nil && m["mcp"]?[LegacyMigration.oldMCPName] == nil && m["mcp"]?["other"] != nil, "\(added)")
+} catch { check("upgrade: config link", false, "\(error)") }
 
 // MARK: 2. live
 
@@ -185,9 +288,9 @@ struct Chat {
 if offline {
     print("skip  live checks (--offline)")
 } else if !status.usable {
-    check("controller reachable for live checks", false, "start dev.openafm.agent or pass --offline")
+    check("controller reachable for live checks", false, "start dev.onbud.agent or pass --offline")
 } else if let token = paths.readToken() {
-    // The controller only reads folders inside $HOME, so the fixture lives under ~/OpenAFM/runtime.
+    // The controller only reads folders inside $HOME, so the fixture lives under ~/OnBud/runtime.
     let fx = paths.home.appendingPathComponent("runtime/spotlight-smoke/\(Int(Date().timeIntervalSince1970))")
     let files: [String: String] = [
         "src/__init__.py": "", "tests/__init__.py": "",

@@ -12,7 +12,7 @@ import { redact } from "../security/gate.ts";
 export interface WebResult { title: string; url: string; snippet: string; source: string }
 export type WebKind = "general" | "papers" | "encyclopedia";
 
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) OpenAFM/0.1 (local research assistant)";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) OnBud/0.1 (local research assistant)";
 const SEARXNG = process.env.SEARXNG_URL ?? "http://127.0.0.1:8888";
 
 const decode = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
@@ -55,7 +55,7 @@ async function duckduckgo(q: string, n: number): Promise<WebResult[]> {
 async function arxiv(q: string, n: number): Promise<WebResult[]> {
   // Every word must match (arXiv treats space-separated terms loosely otherwise).
   const terms = q.toLowerCase().split(/[^\p{L}\p{N}-]+/u).filter((t) => t.length >= 3 && !/^(the|and|for|with|from|about|paper|papers|related|relevant|work|works|study|studies|research|survey|논문|관련|연구)$/.test(t)).slice(0, 6);
-  // The first two words as a phrase ("temporal heads"), the rest as required words.
+  // The first two words as a phrase ("sparse attention"), the rest as required words.
   const parts = terms.length >= 2 ? [`all:%22${encodeURIComponent(terms[0] + " " + terms[1])}%22`, ...terms.slice(2).map((t) => `all:${encodeURIComponent(t)}`)] : terms.map((t) => `all:${encodeURIComponent(t)}`);
   const sq = parts.join("+AND+");
   const r = await get(`https://export.arxiv.org/api/query?search_query=${sq}&start=0&max_results=${n}&sortBy=relevance`);

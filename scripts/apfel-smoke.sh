@@ -2,9 +2,9 @@
 # Small functional smoke tests of the apfel CLI (on-device only). Not a benchmark.
 set -u
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-OPENAFM_HOME="${OPENAFM_HOME:-$(dirname "$REPO")}"
-OUT="$OPENAFM_HOME/runtime/reports/apfel-smoke-$(date +%Y%m%d-%H%M%S).txt"
+REPO="$(cd "$(dirname "$0")/.." && pwd -P)"   # real path, also when run through the ~/OnBud link
+ONBUD_HOME="${ONBUD_HOME:-$(dirname "$REPO")}"
+OUT="$ONBUD_HOME/runtime/reports/apfel-smoke-$(date +%Y%m%d-%H%M%S).txt"
 SYS="$REPO/policies/AFM.md"
 SCHEMA="$REPO/policies/schemas/error-report.schema.json"
 FIX="$REPO/eval/fixtures/error-import.txt"

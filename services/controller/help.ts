@@ -22,7 +22,7 @@ const CATALOG: Record<Exclude<Topic, "all">, { title: { ko: string; en: string }
     { cmd: "Codex 제안에: 예 / 전환 / 브랜치 / 로컬 / 분석만 / 아니요", cmdEn: "to a Codex offer: yes / switch / branch / local / analyse only / no", ko: "예=Codex로 진행, 전환=이 대화를 codex로, 브랜치=Codex가 별도 브랜치에서, 로컬=AFM 작업, 분석만=읽기 전용", en: "yes = Codex, switch = this chat to codex, branch = Codex on its own branch, local = AFM job, analyse only = read-only" },
     { cmd: "명령어 알려줘 [영어로]", cmdEn: "show commands [in Korean]", ko: "이 도움말", en: "This help" },
   ] },
-  scripts: { title: { ko: "터미널 스크립트 (~/OpenAFM/adaptive-coding-agent)", en: "Terminal scripts (~/OpenAFM/adaptive-coding-agent)" }, items: [
+  scripts: { title: { ko: "터미널 스크립트 (~/OnBud/adaptive-coding-agent)", en: "Terminal scripts (~/OnBud/adaptive-coding-agent)" }, items: [
     { cmd: "scripts/doctor.sh", ko: "전체 상태 점검(서비스, 권한, TeX, Decima, SearXNG)", en: "Health check (services, permissions, TeX, Decima, SearXNG)" },
     { cmd: "scripts/afm-launchagent.sh restart|status [apfel|agent]", ko: "apfel·에이전트 서버 재시작/상태. 대상 없으면 둘 다", en: "Restart/status of apfel and the agent server (both if none given)" },
     { cmd: "scripts/decima-setup.sh start|stop|status|test", ko: "Decima(Ollaya, 11436) 실행·점검", en: "Run/check Decima (Ollaya on 11436)" },
@@ -30,7 +30,7 @@ const CATALOG: Record<Exclude<Topic, "all">, { title: { ko: string; en: string }
     { cmd: "scripts/build-tools.sh", ko: "pdftext(PDF·OCR 도우미) 다시 빌드", en: "Rebuild pdftext (PDF/OCR helper)" },
     { cmd: "node --experimental-strip-types --experimental-sqlite bin/report.ts --days 7", ko: "텔레메트리 보고서(경로, 실패, Decima 일치율)", en: "Telemetry report (routes, failures, rules vs Decima)" },
     { cmd: "npm test", ko: "전체 테스트", en: "Run all tests" },
-    { cmd: "tmux -L openafm attach -t <세션>", ko: "백그라운드 세션 직접 보기 (빠져나오기: Ctrl-b d)", en: "Watch a background session (detach: Ctrl-b d)" },
+    { cmd: "tmux -L onbud attach -t <세션>", ko: "백그라운드 세션 직접 보기 (빠져나오기: Ctrl-b d)", en: "Watch a background session (detach: Ctrl-b d)" },
     { cmd: "/Applications/OpenCode.app/Contents/Resources/opencode-cli service restart", ko: "OpenCode 서비스 재시작(설정·플러그인 반영)", en: "Restart the OpenCode service (reload config/plugins)" },
   ] },
   git: { title: { ko: "git 기본 명령", en: "git basics" }, items: [
@@ -48,7 +48,7 @@ const CATALOG: Record<Exclude<Topic, "all">, { title: { ko: string; en: string }
     { cmd: "git revert <커밋>", ko: "커밋을 되돌리는 새 커밋(이력 보존)", en: "New commit that undoes one (history kept)" },
     { cmd: "git reset --hard / git push --force", ko: "⚠ 되돌릴 수 없음 — 보안 게이트가 차단해요", en: "⚠ Irreversible — blocked by the security gate" },
   ] },
-  mcp: { title: { ko: "Codex가 쓰는 로컬 도구 (MCP openafm)", en: "Local tools for Codex (MCP openafm)" }, items: [
+  mcp: { title: { ko: "Codex가 쓰는 로컬 도구 (MCP onbud)", en: "Local tools for Codex (MCP onbud)" }, items: [
     { cmd: "read_document", ko: "문서 읽기(OCR, 관련 쪽 찾기)", en: "Read documents (OCR, relevant pages)" },
     { cmd: "find_files", ko: "이름으로 파일 찾기", en: "Find files by name" },
     { cmd: "afm_summarize / afm_write", ko: "AFM 요약·초안(원문은 Mac에 남음)", en: "On-device summaries and drafts (raw text stays on the Mac)" },

@@ -1,8 +1,8 @@
-# OpenAFM local-agent benchmark
+# OnBud local-agent benchmark
 
 This benchmark measures how far an on-device model gets with local tools, with a small router, and with a frontier fallback. It uses the same tasks, checks and protocol for every setting, so other Macs and other local models can be compared with the published numbers.
 
-Everything runs on one Mac. Results are written to `~/OpenAFM/runtime/bench/` (outside the repository).
+Everything runs on one Mac. Results are written to `~/OnBud/runtime/bench/` (outside the repository).
 
 ## Settings
 
@@ -13,6 +13,8 @@ Everything runs on one Mac. Results are written to `~/OpenAFM/runtime/bench/` (o
 | `s3` | S2 plus the Decima router (321M, Ollaya on 127.0.0.1:11436) in advise mode. |
 | `s1` | S3 plus approval-gated web search (SearXNG) and Codex (GPT-6.1 Sol through OpenCode) as a fallback. |
 | `codex` | Codex alone, through OpenCode, one attempt per task. |
+| `copilot` | Code only: GitHub Copilot's inline completion writes, checked on-device, no Codex. |
+| `s5` | Code only: Copilot writes, the code skill's checks (examples, tests, stress test), Codex for what fails. The v0.2.0 default. |
 
 ## Suites
 
@@ -54,19 +56,17 @@ A task passes only if its check passes. A task that needs web or Codex in a sett
 - **Tuning rule:** any setting is tuned on `dev-*` only. Each test subset is run once per version, and reuse is reported.
 - **Data:** the datasets are downloaded by `fetch-code-benchmarks.sh` and are not redistributed here.
 
-### 3. Tool calling (`bfcl-eval.ts`)
+### 3. Skill eval (`tools/skill-eval.ts`)
 
-The BFCL v4 subset has 20 items per category, scored with a simplified AST checker. It compares AFM's native tool calling with the host-side selectors.
-
-### 4. Open models (`server/`)
-
-The same code subsets are generated through any OpenAI-compatible endpoint (vLLM, llama.cpp). They are scored on the Mac by `server/run_remote_subsets.py`, with the same prompts and checks plus the truncation rate. See `server/README.md`.
+The public cases in `skills/<id>/evals/cases.jsonl` (request, folder, programmatic checks), run three times
+each and scored by majority: `npm run skills:eval -- --repeat 3`. Cases about real documents live in
+`~/OnBud/runtime/evals/private` and are never committed.
 
 ## Run
 
 ```sh
 tools/bench/run-suite.sh --public                  # task suite, s2 s3 s1 (+ codex if OpenCode is set up), then the report
-tools/bench/run-suite.sh --public --code --bfcl    # also the code benchmarks and BFCL (downloads the datasets first)
+tools/bench/run-suite.sh --public --code           # also the code benchmarks (downloads the datasets first)
 tools/bench/run-suite.sh --settings s2             # one setting; --public leaves out the private archive tasks
 tools/bench/cleanup-local.sh                       # delete datasets, fixtures and bench jobs; results and logs stay
 ```
@@ -86,8 +86,6 @@ Requirements:
 `report-eval.ts` merges every result into `docs/benchmark-results-<date>.md`. The report has these tables:
 - the task suite by category and setting, with latency, Codex calls and web searches;
 - the code benchmarks, by version and with the S1 route breakdown;
-- BFCL;
-- open models, with truncation;
 - speed and cost.
 
 Codex cost is API-equivalent, from tokens measured per call (`ctok` in each result line). Codex runs on a subscription, so nothing is billed per token. Publish the report together with the `results-*.jsonl` files and `logs/`.

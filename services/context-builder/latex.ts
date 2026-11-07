@@ -1,7 +1,7 @@
 // LaTeX for papers, fully offline (MacTeX in /Library/TeX/texbin; no network, no model needed for the
 // deterministic parts):
 //   - find the main .tex (\documentclass + \begin{document}), pick the engine (xelatex for kotex/fontspec)
-//   - compile with latexmk, shell-escape off, output in ~/OpenAFM/runtime/latex/<project>/ (project untouched)
+//   - compile with latexmk, shell-escape off, output in ~/OnBud/runtime/latex/<project>/ (project untouched)
 //   - parse the log into file:line errors, undefined references/citations, overfull boxes
 //   - cross-check \cite keys against .bib files, \ref against \label, duplicate labels
 // Fixing errors reuses the AFM edit→test loop: the "test" is a compile in a sandbox clone.
@@ -13,7 +13,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { execCommand, type CommandResult } from "./terminal.ts";
 
 const TEXBIN = "/Library/TeX/texbin";
-const OUT_ROOT = join(process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM"), "runtime", "latex");
+const OUT_ROOT = join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "runtime", "latex");
 
 export const hasTeX = () => existsSync(join(TEXBIN, "latexmk"));
 
@@ -82,7 +82,7 @@ export function parseLatexLog(log: string): Omit<LatexReport, "ok" | "pdf" | "ms
   };
 }
 
-/** Compile into ~/OpenAFM/runtime/latex/<project-hash>/ and summarise the log. */
+/** Compile into ~/OnBud/runtime/latex/<project-hash>/ and summarise the log. */
 export async function compileLatex(root: string, main: string, timeoutMs = 180_000): Promise<LatexReport> {
   const outDir = join(OUT_ROOT, createHash("sha256").update(root).digest("hex").slice(0, 10));
   mkdirSync(outDir, { recursive: true });

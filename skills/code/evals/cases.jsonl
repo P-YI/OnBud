@@ -1,0 +1,1 @@
+{"id": "code-explain-function", "q": "What does detectLocalSkill do?", "root": "repo", "expect": {"answer": "local-skills\\.ts|skill"}}

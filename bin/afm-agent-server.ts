@@ -18,8 +18,10 @@ import { OpenCodeFrontier } from "../services/controller/frontier-opencode.ts";
 import { openDb } from "../services/telemetry/db.ts";
 import { SqliteTelemetry } from "../services/telemetry/telemetry.ts";
 import { MemoryStore } from "../services/memory/memory.ts";
+import { contractMode, requestLanguage } from "../services/skills/language.ts";
 import { classifyCommand, execCommand, renderResult } from "../services/context-builder/terminal.ts";
 import { revealInFinder } from "../services/context-builder/finder.ts";
+import { copilotChat, vscodeCli } from "../services/context-builder/apps.ts";
 import { settle, startSession } from "../services/context-builder/sessions.ts";
 import { applyToProject, diffOf, type EditProposal } from "../services/controller/edit-loop.ts";
 import { projectHash } from "../services/telemetry/telemetry.ts";
@@ -28,7 +30,7 @@ import { handOffSession, isSessionId, startSessionIn } from "../services/control
 import { readFileSync as readText } from "node:fs";
 
 const PORT = Number(process.env.AFM_AGENT_PORT ?? 11435);
-const HOME = process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM");
+const HOME = process.env.ONBUD_HOME ?? join(homedir(), "OnBud");
 const TOKEN = readFileSync(join(HOME, "config", "apfel.token"), "utf8").trim();
 const MODEL_ID = "afm-controller";
 const MAX_BODY = 16 * 1024 * 1024;   // OpenCode resends the whole conversation every turn
@@ -38,22 +40,22 @@ const telemetry = new SqliteTelemetry(db);
 const controller = new Controller({ afm: new ApfelProvider(), telemetry, memory: new MemoryStore(db), db });
 const frontier = new OpenCodeFrontier({ agent: "codex-handoff" });
 
-// Launcher settings (apps/spotlight): "x-openafm-setting: s2" (rules only) or "s3" (+ Decima advise) runs the
-// request like the evaluation settings, without web search or Codex; "x-openafm-web: on" (the launcher's web
+// Launcher settings (apps/spotlight): "x-onbud-setting: s2" (rules only) or "s3" (+ Decima advise) runs the
+// request like the evaluation settings, without web search or Codex; "x-onbud-web: on" (the launcher's web
 // search plugin) keeps the approval-gated web search on. Without the setting header nothing changes.
 type Setting = "s2" | "s3";
 const SETTING_ENV: Record<Setting, Record<string, string>> = {
-  s2: { OPENAFM_DECIMA_MODE: "off", OPENAFM_FRONTIER: "off", OPENAFM_WEB: "off" },
-  s3: { OPENAFM_DECIMA_MODE: "advise", OPENAFM_FRONTIER: "off", OPENAFM_WEB: "off" },
+  s2: { ONBUD_DECIMA_MODE: "off", ONBUD_FRONTIER: "off", ONBUD_WEB: "off" },
+  s3: { ONBUD_DECIMA_MODE: "advise", ONBUD_FRONTIER: "off", ONBUD_WEB: "off" },
 };
 const settingControllers = new Map<string, Controller>();
 /** Applies the setting's env for one request (safe: one request at a time) and returns the restore function. */
 function enterSetting(setting: Setting, web = false): () => void {
   const saved = Object.fromEntries(Object.keys(SETTING_ENV[setting]).map((k) => [k, process.env[k]]));
-  Object.assign(process.env, SETTING_ENV[setting], web ? { OPENAFM_WEB: "on" } : {});
+  Object.assign(process.env, SETTING_ENV[setting], web ? { ONBUD_WEB: "on" } : {});
   return () => { for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v; };
 }
-/** "x-openafm-router-model" (s3): another router model installed in Ollaya instead of the policy's decima_model.
+/** "x-onbud-router-model" (s3): another router model installed in Ollaya instead of the policy's decima_model.
  *  The digest pin still applies: a model the thresholds were not calibrated on runs in shadow. */
 const ROUTER_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,79}$/;
 function controllerFor(setting: Setting | undefined, routerModel?: string): Controller {
@@ -108,6 +110,7 @@ export const isNo = (s: string) => NO.test(s.trim());
 const SWITCH = /^(전환|전환해|전환해줘|codex로 전환(해줘)?|코덱스로 전환(해줘)?|편집까지|수정까지|switch|switch to codex)[.!\s]*$/i;
 const BRANCH = /^(브랜치|브랜치에서|브랜치로|worktree|branch|on a branch|in a branch)[.!\s]*$/i;
 const LOCAL = /^(로컬|로컬로|로컬로 진행|로컬로 해줘|오프라인|afm으로|local|locally|offline)[.!\s]*$/i;
+const COPILOT = /^(copilot|코파일럿|vs\s?code|vscode|copilot으로|코파일럿으로|copilot에게|코파일럿에게)( 보내줘| 보내| 넘겨줘)?[.!\s]*$/i;
 const ANALYSE = /^(분석만|분석만 해줘|읽기 전용|읽기만|read[- ]?only|analy[sz]e only|just analy[sz]e)[.!\s]*$/i;
 /** Does the escalated task change files? Then Codex should work as the editing agent, not read-only. */
 export function needsEdits(prompt: string, reason: string): boolean {
@@ -173,7 +176,7 @@ function sessionKey(root: string | undefined, turns: any[]): string {
 
 export function render(o: Outcome, seconds: number, chatOnly = false, ko = false, canSwitch = false, edits = false): string {
   const meta = `\n\n— AFM controller · ${o.route} · ${o.reasonCode}${o.skill ? ` · skill ${o.skill}` : ""} · ${seconds.toFixed(1)}s`
-    + (chatOnly ? " · chat only (open a project folder to let AFM read files)" : "");
+    + (chatOnly && !o.skill ? " · chat only (open a project folder to let AFM read files)" : "");   // a skill that ran without a folder (convert, Mac tasks) did its work
   switch (o.status) {
     case "answered_local":
       return (o.isProposal ? "Proposal only — not applied or tested.\n\n" : "") + (o.answer ?? "") + meta;
@@ -190,6 +193,8 @@ export function render(o: Outcome, seconds: number, chatOnly = false, ko = false
             ? "**Switch to Codex (GPT-6.1 Sol)?** Reply `yes` and this chat moves to the **editing codex agent**, which continues the request; every file edit and command asks for approval. Reply `branch` to have Codex work on a separate git branch (worktree) instead of main, `local` for the on-device model's to-do list, `analyse only` for a read-only answer, `no` to stop. (Uses your Codex quota.)"
             : "**Hand it to Codex (GPT-6.1 Sol)?** Reply `yes` for a **read-only** analysis here, or `switch` to move this chat to the editing codex agent. (Uses your Codex quota.)")
           : "**Hand it to Codex (GPT-6.1 Sol)?** Reply `yes` and Codex will analyse this folder **read-only** and answer here (uses your Codex quota). To let it edit files, switch the agent to **codex**.")) +
+        // VS Code's Copilot chat (Auto: no premium requests on Student/Free plans) as a credit-free alternative.
+        (vscodeCli() ? (ko ? "\n\n`copilot`이라고 답하면 Codex 대신 **VS Code Copilot 채팅**으로 넘겨요 (Auto 모델은 크레딧이 줄지 않아요)." : "\n\nReply `copilot` to hand it to **VS Code's Copilot chat** instead (Auto uses no premium requests).") : "") +
         `\n\n<details><summary>local pre-analysis</summary>\n\n${o.capsule ?? ""}\n\n</details>` + meta;
     default:
       return (o.answer ?? "No answer.") + meta;
@@ -249,17 +254,17 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
   }
   const t0 = Date.now();
   const key = sessionKey(root, turns);
-  const ko = /[\uac00-\ud7a3]/.test(prompt);
+  const ko = contractMode() === "on" ? requestLanguage(prompt) === "ko" : /[\uac00-\ud7a3]/.test(prompt);
   const sid = String(req.headers["x-opencode-session-id"] ?? "");
   const sessionID = isSessionId(sid) ? sid : undefined;   // OpenCode 2.x only; the 1.x CLI sends none
-  const hs = String(req.headers["x-openafm-setting"] ?? "").toLowerCase();
+  const hs = String(req.headers["x-onbud-setting"] ?? "").toLowerCase();
   const setting: Setting | undefined = hs === "s2" || hs === "s3" ? hs : undefined;
-  const leaveSetting = setting ? enterSetting(setting, String(req.headers["x-openafm-web"] ?? "") === "on") : undefined;
+  const leaveSetting = setting ? enterSetting(setting, String(req.headers["x-onbud-web"] ?? "") === "on") : undefined;
   // Launcher only: each controller step as a content-free chunk, so the panel can show live progress.
   const onStep = setting && body.stream
-    ? (s: { kind: string; detail: string }) => res.write(chunk({}, null, { openafm: { step: s.kind, detail: String(s.detail ?? "").slice(0, 160) } }))
+    ? (s: { kind: string; detail: string }) => res.write(chunk({}, null, { onbud: { step: s.kind, detail: String(s.detail ?? "").slice(0, 160) } }))
     : undefined;
-  const controller = controllerFor(setting, String(req.headers["x-openafm-router-model"] ?? "") || undefined);
+  const controller = controllerFor(setting, String(req.headers["x-onbud-router-model"] ?? "") || undefined);
   try {
     const waiting = pending.get(key);
     let text: string;
@@ -278,9 +283,14 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
       const koW = /[\uac00-\ud7a3]/.test(waiting.prompt);
       text = koW ? "런처의 로컬 모델은 Codex를 직접 부르지 않아요. Codex에게 맡기려면 런처의 **Codex로 보내기** 버튼(Codex 플러그인)을 쓰고, 로컬 AFM이 별도 브랜치에서 해 보게 하려면 `로컬`, 그만두려면 `아니요`라고 답하세요."
         : "The launcher's local models do not call Codex themselves. Use the launcher's **Send to Codex** button (Codex plugin), reply `local` to let the on-device model try on a branch, or `no` to stop.";
-    } else if (waiting && waiting.kind !== "reveal" && Date.now() - waiting.at < PENDING_TTL_MS && (isYes(prompt) || isNo(prompt) || (waiting.kind === "handoff" && (SWITCH.test(prompt.trim()) || ANALYSE.test(prompt.trim()) || LOCAL.test(prompt.trim()) || BRANCH.test(prompt.trim()))))) {
+    } else if (waiting && waiting.kind !== "reveal" && Date.now() - waiting.at < PENDING_TTL_MS && (isYes(prompt) || isNo(prompt) || (waiting.kind === "handoff" && (SWITCH.test(prompt.trim()) || ANALYSE.test(prompt.trim()) || LOCAL.test(prompt.trim()) || BRANCH.test(prompt.trim()) || COPILOT.test(prompt.trim()))))) {
       pending.delete(key);
-      if (waiting.kind === "handoff" && BRANCH.test(prompt.trim()) && waiting.root) {
+      if (waiting.kind === "handoff" && COPILOT.test(prompt.trim())) {
+        // The request goes to VS Code's Copilot chat (opened for the user; nothing is sent on their behalf).
+        const ok = await copilotChat(waiting.prompt, waiting.root, [], waiting.edits ? "agent" : "ask");
+        text = ok ? (ko ? "**VS Code Copilot 채팅**으로 넘겼어요. VS Code에서 이어서 진행하세요 (Auto 모델은 크레딧이 줄지 않아요)." : "Handed to **VS Code's Copilot chat**; continue there (Auto uses no premium requests).")
+          : (ko ? "VS Code를 열지 못했어요." : "Could not open VS Code.");
+      } else if (waiting.kind === "handoff" && BRANCH.test(prompt.trim()) && waiting.root) {
         // Codex works in its own branch + worktree (new OpenCode session there); main stays untouched.
         const { createFrontierJob, journalPath } = await import("../services/controller/jobs.ts");
         const koW = /[\uac00-\ud7a3]/.test(waiting.prompt);
@@ -365,20 +375,26 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
           const label = st.name?.replace(/^afm-[0-9a-f]{6}-/, "");
           text = st.ok
             ? (ko ? `백그라운드 세션 \`${label}\`에서 실행 중이에요.` : `Running in background session \`${label}\`.`) + "\n\n```\n" + (first.slice(-2500) || "(no output yet)") + "\n```\n\n"
-              + (ko ? `출력 보기: "로그 보여줘" · 종료: "세션 종료해줘" · 직접 보기: \`tmux -L openafm attach -t ${st.name}\`` : `Output: ask "show the log" · stop: "stop the session" · watch: \`tmux -L openafm attach -t ${st.name}\``)
+              + (ko ? `출력 보기: "로그 보여줘" · 종료: "세션 종료해줘" · 직접 보기: \`tmux -L onbud attach -t ${st.name}\`` : `Output: ask "show the log" · stop: "stop the session" · watch: \`tmux -L onbud attach -t ${st.name}\``)
             : (ko ? `세션을 시작하지 못했어요 (${st.error}).` : `Could not start a session (${st.error}).`);
         }
-      } else if (waiting.kind === "command" && isYes(prompt) && waiting.root && waiting.command) {
+      } else if (waiting.kind === "command" && isYes(prompt) && waiting.command) {
+        // A command typed without a project folder (e.g. `opencode auth list`) runs in the home folder and its output is
+        // shown as is; with a project, the controller then answers the original request from the output.
+        const cwd = waiting.root ?? homedir();
         // User approved a command AFM asked for: run it (the gate still applies), then answer with its output.
-        const cls = classifyCommand(waiting.command, waiting.root);
+        const cls = classifyCommand(waiting.command, cwd);
         if (cls.mode === "blocked") {
           text = (ko ? "보안 게이트가 이 명령을 막았어요" : "The security gate blocked this command") + ` (${cls.reasons.join(", ")}).`;
         } else {
-          const r = await execCommand(waiting.command, waiting.root, { timeoutMs: 120_000 });
+          const r = await execCommand(waiting.command, cwd, { timeoutMs: 120_000 });
           telemetry.toolCall({ tool: "run_command_approved", ok: r.exitCode === 0, durationMs: r.ms, resultChars: r.output.length });
-          const out = await controller.handle({ prompt: waiting.prompt, root: waiting.root, frontEnd: "opencode",
-            history: `${history}\nuser approved and the controller ran:\n${renderResult(waiting.command, r)}` });
-          text = "```\n" + renderResult(waiting.command, r).slice(0, 2500) + "\n```\n\n" + render(out, (Date.now() - t0) / 1000, !waiting.root, ko);
+          if (!waiting.root) text = "```\n" + renderResult(waiting.command, r).slice(0, 4000) + "\n```";
+          else {
+            const out = await controller.handle({ prompt: waiting.prompt, root: waiting.root, frontEnd: "opencode",
+              history: `${history}\nuser approved and the controller ran:\n${renderResult(waiting.command, r)}` });
+            text = "```\n" + renderResult(waiting.command, r).slice(0, 2500) + "\n```\n\n" + render(out, (Date.now() - t0) / 1000, !waiting.root, ko);
+          }
         }
       } else if (isNo(prompt) && waiting.kind !== "handoff") {
         text = ko ? "알겠어요, 아무것도 실행하거나 바꾸지 않았어요." : "OK, nothing was run or changed.";
@@ -394,6 +410,9 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
           ? (koW ? "**codex 에이전트로 전환했어요.** 이 응답이 끝나면 Codex(GPT-6.1 Sol)가 같은 대화에서 요청을 이어서 처리해요. 파일 수정과 명령 실행은 매번 승인 창이 떠요. 작업이 끝난 뒤 AFM으로 돌아오려면 에이전트를 **afm**으로 바꾸세요."
                : "**Switched this chat to the codex agent.** When this reply ends, Codex (GPT-6.1 Sol) continues the request here; every edit and command asks for approval. Switch the agent back to **afm** afterwards.")
           : (koW ? `자동 전환에 실패했어요 (${r.step}: ${r.detail}). 에이전트 선택에서 **codex**를 고른 뒤 같은 요청을 보내 주세요.` : `Could not switch automatically (${r.step}: ${r.detail}). Pick **codex** in the agent selector and send the request again.`);
+      } else if (waiting.kind !== "handoff") {
+        // Only a hand-off goes to Codex; an approval this server cannot carry out is said, not forwarded.
+        text = ko ? "이 승인 대기 항목은 지금 처리할 수 없어요 (프로젝트 폴더가 필요해요). 폴더를 연 뒤 다시 요청해 주세요." : "This pending item cannot be carried out here (it needs a project folder). Open the folder and ask again.";
       } else {
         if (body.stream) res.write(chunk({ content: ko ? "Codex로 넘겼어요 — 읽기 전용으로 분석 중…\n\n" : "Handed to Codex — analysing read-only…\n\n" }, null));
         const handoff = `${waiting.prompt}\n\n---\nLocal pre-analysis by the on-device model (redacted, may be incomplete):\n${waiting.capsule}` +
@@ -422,7 +441,7 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
     }
     const usage = { prompt_tokens: capsuleTokens, completion_tokens: Math.ceil(text.length / 3), total_tokens: capsuleTokens + Math.ceil(text.length / 3) };
     // Launcher requests also get what is waiting for the user's answer, so it can show yes/no buttons.
-    const extra = setting ? { openafm: { setting, awaiting: pending.get(key)?.kind ?? null } } : {};
+    const extra = setting ? { onbud: { setting, awaiting: pending.get(key)?.kind ?? null } } : {};
     if (body.stream) {
       res.write(chunk({ content: text }, null));
       res.write(chunk({}, "stop", { usage, ...extra }));
@@ -446,7 +465,7 @@ const server = createServer((req, res) => {
   if (url.pathname === "/health") return send(res, 200, { status: "ok", model: MODEL_ID, busy });
   if (!authorized(req)) return send(res, 401, { error: { message: "unauthorized" } });
   if (req.method === "GET" && url.pathname === "/v1/models") {
-    return send(res, 200, { object: "list", data: [{ id: MODEL_ID, object: "model", owned_by: "openafm" }] });
+    return send(res, 200, { object: "list", data: [{ id: MODEL_ID, object: "model", owned_by: "onbud" }] });
   }
   if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
     let size = 0;

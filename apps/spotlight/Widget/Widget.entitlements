@@ -7,7 +7,7 @@
 	<true/>
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
 	<array>
-		<string>/Library/Application Support/OpenAFM/widget/</string>
+		<string>/Library/Application Support/OnBud/widget/</string>
 	</array>
 </dict>
 </plist>

@@ -24,11 +24,13 @@ import { execCommand, type CommandResult } from "../context-builder/terminal.ts"
 import { findMainTex, hasTeX, parseLatexLog, trialCompileCommand } from "../context-builder/latex.ts";
 import { detectTestCommand, proposeEdit, syntaxCheck } from "./edit-loop.ts";
 import type { DecimaClient } from "../laya-router/decima.ts";
+import { fill, type Filler } from "../frontier/copilot-ls.ts";
+import { recallStrategy, recordStrategy, strategyOutcome } from "../skills/strategy.ts";
 
-const HOME = process.env.OPENAFM_HOME ?? join(homedir(), "OpenAFM");
+const HOME = process.env.ONBUD_HOME ?? join(homedir(), "OnBud");
 const JOBS = join(HOME, "runtime", "jobs");
 const TREES = join(HOME, "runtime", "worktrees");
-const AUTHOR = ["-c", "user.name=OpenAFM local agent", "-c", "user.email=afm@localhost", "-c", "commit.gpgsign=false"];
+const AUTHOR = ["-c", "user.name=OnBud local agent", "-c", "user.email=afm@localhost", "-c", "commit.gpgsign=false"];
 
 export type StepAction = "create_file" | "edit_file" | "insert" | "run_tests" | "rename_symbol";
 export interface JobStep {
@@ -276,8 +278,11 @@ export async function planJob(afm: AFMProvider, a: { root: string; request: stri
     journal(job0, `# Local job ${id0}\n\n- request: ${job0.request}\n- project: ${a.root}\n- plan: deterministic rename (no model needed)\n\n## Plan\n${steps0.map((s) => `${s.n}. **${s.action}** — ${s.description}`).join("\n")}\n`);
     return { ok: true, job: job0 };
   }
+  // P5: plans that worked and failed for similar tasks (generalised, local); the planner reads them as a contrast
+  const recalled = recallStrategy(kind === "latex" ? "writing" : "code", a.request);
   const r = await afm.generate({ system: "You plan small, concrete steps that a small model can do one at a time. Each step touches exactly one file. Use only paths from PROJECT FILES for edit_file and insert. End with run_tests when a check command exists.",
-    user, schema: PLAN_SCHEMA, maxTokens: 700, timeoutMs: a.timeoutMs ?? 60_000 });
+    user: recalled ? `${user}\n\nPLANS FROM SIMILAR PAST TASKS (follow what worked, avoid what failed; paths there are placeholders):\n${recalled.text}` : user,
+    schema: PLAN_SCHEMA, maxTokens: 700, timeoutMs: a.timeoutMs ?? 60_000 });
   if (!r.ok) return { ok: false, error: `afm_${r.failure}` };
   const raw = ((r.json as any).steps ?? []) as { action: StepAction; path: string; description: string }[];
   const steps: JobStep[] = [];
@@ -313,6 +318,7 @@ export async function planJob(afm: AFMProvider, a: { root: string; request: stri
   if (!steps.some((s) => s.action !== "run_tests")) return { ok: false, error: "empty_plan" };
   const id = `${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomUUID().slice(0, 6)}`;
   const job: Job = { id, root: a.root, request: redact(a.request).text, createdAt: now(), kind, workspace: { kind: "copy", dir: "", work: "", branch: `afm/${id}`, base: "" }, testCmd, steps, status: "planned", offline: a.offline };
+  if (recalled) (job as any).strategyIds = recalled.ids;
   if (a.decima && (await a.decima.available())) {
     try {
       const d = await a.decima.route({ taskType: "multi_file_change", estimatedInputTokens: 0, filesTouched: steps.length, localAfmAvailable: true, prompt: `${a.request}\nPLAN:\n${steps.map((s) => `${s.n}. ${s.action} ${s.path ?? ""}: ${s.description}`).join("\n")}` }, ["LOCAL_AFM", "FRONTIER_GPT", "ASK_USER"]);
@@ -320,7 +326,7 @@ export async function planJob(afm: AFMProvider, a: { root: string; request: stri
     } catch { /* advisory only */ }
   }
   saveJob(job);
-  journal(job, `# Local job ${id}\n\n- request: ${job.request}\n- project: ${a.root}\n- kind: ${kind}, offline: ${a.offline}, check: ${testCmd ?? "none"}\n- created: ${job.createdAt}\n\n## Plan (AFM)\n${steps.map((s) => `${s.n}. **${s.action}** ${s.path ?? ""} — ${s.description}`).join("\n")}\n${job.decimaPlanRisk !== undefined ? `\nDecima: destructive=${job.decimaPlanRisk.toFixed(2)}\n` : ""}`);
+  journal(job, `# Local job ${id}\n\n- request: ${job.request}\n- project: ${a.root}\n- kind: ${kind}, offline: ${a.offline}, check: ${testCmd ?? "none"}\n- created: ${job.createdAt}\n\n## Plan (AFM)\n${steps.map((s) => `${s.n}. **${s.action}** ${s.path ?? ""} — ${s.description}`).join("\n")}\n${recalled ? `\nStrategy memory: ${recalled.ids.length} plan(s) of similar tasks shown to the planner\n` : ""}${job.decimaPlanRisk !== undefined ? `\nDecima: destructive=${job.decimaPlanRisk.toFixed(2)}\n` : ""}`);
   return { ok: true, job };
 }
 
@@ -329,7 +335,27 @@ async function check(job: Job, path?: string): Promise<{ ok: boolean; label: str
   const w = job.workspace.work;
   const syn = path && existsSync(join(w, path)) ? syntaxCheck(path) : undefined;
   if (syn) { const r = await execCommand(syn, w, { timeoutMs: 20_000, maxChars: 3000 }); if (r.exitCode !== 0) return { ok: false, label: "syntax", result: r }; }
+  const missing = path ? missingDefinitions(job, path) : [];
+  if (missing.length) return { ok: false, label: `missing ${missing.map((n) => `${n}()`).join(", ")}` };
   return { ok: true, label: syn ? "syntax ok" : "no syntax check" };
+}
+
+/** Functions the work asks for by name ("total_value(path)") that this code step's file should define and that
+ *  no file of the workspace defines yet. A syntax check alone let a file with only "import csv" pass (framework
+ *  E3): this check can fail. Names count for a step when its description names them, or when it is the job's
+ *  only code step (then the request's names are its job). */
+export function missingDefinitions(job: Job, path: string): string[] {
+  const lang = CODE_LANG[extname(path)];
+  if (!lang || isTestPath(path)) return [];
+  const step = job.steps.find((st) => st.path === path && st.action !== "run_tests");
+  const codeSteps = job.steps.filter((st) => st.path && st.action !== "run_tests" && !isTestPath(st.path) && CODE_LANG[extname(st.path)]);
+  const named = (t: string) => [...t.matchAll(/\b([A-Za-z_][A-Za-z0-9_]{2,})\s*\(/g)].map((m) => m[1]).filter((n) => !/^(print|len|open|range|str|int|list|dict|set|return|if|for|while|def|function|assert)$/.test(n));
+  const want = new Set([...(step ? named(step.description) : []), ...(codeSteps.length === 1 ? named(job.request) : [])]);
+  if (!want.size) return [];
+  const defines = (src: string, n: string) => new RegExp(`(^|\\n)\\s*(async\\s+)?(def|function|func|fn|class)\\s+${n}\\b|\\b(const|let|var)\\s+${n}\\s*=|\\bexport\\s+(async\\s+)?function\\s+${n}\\b`).test(src);
+  let src = ""; try { src = readFileSync(join(job.workspace.work, path), "utf8"); } catch { return []; }
+  const others = projectFiles(job.workspace.work, 200).filter((f) => f !== path && CODE_LANG[extname(f)]).map((f) => { try { return readFileSync(join(job.workspace.work, f), "utf8"); } catch { return ""; } });
+  return [...want].filter((n) => !defines(src, n) && !others.some((o) => defines(o, n)));
 }
 async function runChecks(job: Job): Promise<{ ok: boolean; label: string; result?: CommandResult }> {
   if (!job.testCmd) return { ok: true, label: "no tests" };
@@ -338,7 +364,10 @@ async function runChecks(job: Job): Promise<{ ok: boolean; label: string; result
   // Tests that already failed before the job are not this job's fault: pass if there are no NEW failures.
   const base: string[] | undefined = (job as any).baselineFailures;
   const now = failingTests(r.output);
-  if (!r.timedOut && base?.length && now.size && [...now].every((t) => base.includes(t))) return { ok: true, label: `tests (only ${now.size} pre-existing failure${now.size > 1 ? "s" : ""})`, result: r };
+  const wantsPass = /(테스트|tests?).{0,12}(통과|pass)|make .{0,30}pass/i.test(job.request);
+  const touched = job.steps.filter((st) => st.path && !isTestPath(st.path)).map((st) => st.path!);
+  const inTouched = touched.some((p) => r.output.includes(`/${p}"`) || r.output.includes(`${p}:`));
+  if (!r.timedOut && !wantsPass && !inTouched && base?.length && now.size && [...now].every((t) => base.includes(t))) return { ok: true, label: `tests (only ${now.size} pre-existing failure${now.size > 1 ? "s" : ""})`, result: r };
   return { ok: false, label: /latexmk/.test(job.testCmd) ? "compile" : "tests", result: r };
 }
 
@@ -481,12 +510,148 @@ async function commitStep(job: Job, step: JobStep, failing: boolean): Promise<st
   const ws = job.workspace;
   await git(["add", "-A", "--", ".", ":!.afm-build"], ws.dir);
   const msg = `${failing ? "[FAILING] " : ""}step ${step.n}: ${step.action} ${step.path ?? ""} — ${step.description}`.slice(0, 200);
-  const c = await git([...AUTHOR, "commit", "-q", "--allow-empty", "-m", msg, "-m", `OpenAFM local job ${job.id}; journal: ${journalPath(job.id)}`], ws.dir);
+  const c = await git([...AUTHOR, "commit", "-q", "--allow-empty", "-m", msg, "-m", `OnBud local job ${job.id}; journal: ${journalPath(job.id)}`], ws.dir);
   return c.code === 0 ? (await git(["rev-parse", "--short", "HEAD"], ws.dir)).out.trim() : undefined;
 }
 
 /** Run all pending steps. `onProgress` streams one line per step to the chat. */
-export async function runJob(afm: AFMProvider, job: Job, opts: { decima?: DecimaClient; onProgress?: (line: string) => void } = {}): Promise<Job> {
+const CODE_LANG: Record<string, string> = { ".py": "python", ".ts": "typescript", ".js": "javascript", ".tsx": "typescriptreact", ".jsx": "javascriptreact", ".go": "go", ".rs": "rust", ".java": "java", ".swift": "swift", ".rb": "ruby", ".c": "c", ".cpp": "cpp", ".kt": "kotlin" };
+const COMMENT = (lang: string) => (/python|ruby/.test(lang) ? "#" : "//");
+/** Copilot's version of one code step. New file: written after a comment header that states the step and the
+ *  request. Existing file: the body of a function the step or the failure names is rewritten after its signature
+ *  (and docstring), with the rest of the file after the cursor. Writes the file; returns what was done, or
+ *  undefined when Copilot gave nothing. */
+const defsIn = (code: string) => [...code.matchAll(/^(?:async\s+)?(?:def|function|func|fn)\s+([A-Za-z_][A-Za-z0-9_]*)/gm)].map((m) => m[1]);
+/** notes: the code skill's pattern-dictionary notes for contest-style requests (comments in the new file's header). */
+export async function copilotStep(ls: Filler, job: Job, step: JobStep, failure: string, sigRoot = job.workspace.work, notes?: string): Promise<{ what: string; fns: string[]; accept: () => void } | undefined> {
+  const abs = join(job.workspace.work, step.path!);
+  const lang = CODE_LANG[extname(step.path!)];
+  const c = COMMENT(lang);
+  if (step.action === "create_file" || !existsSync(abs)) {
+    const header = `${c} ${step.description}\n${c} Part of: ${job.request.replace(/\n/g, " ").slice(0, 300)}\n`
+      + (notes ? `${c} Approach to check against the request (not a specification):\n${notes.split("\n").map((l) => `${c}   ${l}`).join("\n")}\n` : "");
+    const others = signatures(sigRoot, projectFiles(sigRoot, 30).filter((f) => f !== step.path)).slice(0, 1500);
+    const prefix = header + (others ? `${c} Project code it can use:\n${others.split("\n").map((l) => `${c}   ${l}`).join("\n")}\n` : "") + "\n";
+    const r = await fill(ls, abs, lang, prefix, "", 10);
+    let body = r.text;
+    const items = [...r.items];
+    // A function the work names ("total_value(path)") that Copilot did not write: put its signature in the file,
+    // as a user would, and let Copilot fill the body (framework E3: Copilot stopped after "import csv").
+    mkdirSync(dirname(abs), { recursive: true });
+    for (const [, name, params] of `${step.description} ${job.request}`.matchAll(/\b([A-Za-z_][A-Za-z0-9_]{2,})\s*\(([^()]{0,80})\)/g)) {
+      if (new RegExp(`\\b(def|function|func|fn)\\s+${name}\\b`).test(body) || /^(print|len|open|range|str|int|list|dict|set)$/.test(name)) continue;
+      const sig = lang === "python" ? `def ${name}(${params}):\n` : lang === "go" ? `func ${name}(${params}) {\n` : lang === "rust" ? `fn ${name}(${params}) {\n` : `function ${name}(${params}) {\n`;
+      const head = prefix + body.replace(/\s*$/, "\n\n\n") + sig;
+      const more = await fill(ls, abs, lang, head, lang === "python" ? "\n" : "\n}\n", 6);
+      if (!more.text.trim()) continue;
+      body = body.replace(/\s*$/, "\n\n\n") + sig + more.text + (lang === "python" ? "" : (/}\s*$/.test(more.text) ? "" : "}\n"));
+      items.push(...more.items);
+    }
+    if (!body.trim()) return undefined;
+    writeFileSync(abs, prefix + body);
+    return { what: "wrote the new file", fns: defsIn(body), accept: () => items.forEach((it) => ls.accept(it)) };
+  }
+  const text = readFileSync(abs, "utf8");
+  const names = [...`${step.description} ${failure}`.matchAll(/\b([A-Za-z_][A-Za-z0-9_]{2,})\b/g)].map((m) => m[1]);
+  // Every function the step or the failure names is (re)written, in file order (a step may name several).
+  // A step whose description names no function of the file (AFM's plan can be vague: "create a new file to hold
+  // the new functions") takes the names from the request itself.
+  const defs = [...text.matchAll(/^[ \t]*(?:async\s+)?(?:def|function|func|fn)\s+([A-Za-z_][A-Za-z0-9_]*)/gm)].map((m) => m[1]);
+  let wanted = new Set(names.filter((n) => defs.includes(n)));
+  const fromRequest = !wanted.size;   // then only stubs are written (a done function is left alone)
+  if (fromRequest) wanted = new Set([...job.request.matchAll(/\b([A-Za-z_][A-Za-z0-9_]{2,})\b/g)].map((m) => m[1]).filter((n) => defs.includes(n)));
+  if (!wanted.size) {
+    // Nothing to rewrite (a new function for an existing file): written after the file, below a comment that
+    // states the step, as a user would ask Copilot for it.
+    if (step.action !== "insert" && step.action !== "edit_file") return undefined;
+    const prefix = text.replace(/\s*$/, "\n\n\n") + `${c} ${step.description}\n`;
+    const r = await fill(ls, abs, lang, prefix, "", 8);
+    if (!r.text.trim()) return undefined;
+    writeFileSync(abs, prefix + r.text);
+    return { what: "added code at the end", fns: defsIn(r.text), accept: () => r.items.forEach((it) => ls.accept(it)) };
+  }
+  const done: string[] = [];
+  const items: any[] = [];
+  for (const fn of [...new Set(defs)].filter((n) => wanted.has(n)).slice(0, 6)) {
+    const r = await rewriteFunction(ls, abs, lang, fn, step.description, fromRequest);
+    if (r) { done.push(`${fn}()`); items.push(...r); }
+  }
+  if (!done.length) return undefined;
+  return { what: `rewrote ${done.join(", ")}`, fns: done.map((x) => x.replace(/\(\)$/, "")), accept: () => items.forEach((it) => ls.accept(it)) };
+}
+
+/** A stub body (what the code had before it was written): Copilot sometimes copies one from a neighbour. */
+const STUB = /^(raise NotImplementedError\b.*|pass|\.\.\.|return( None)?|throw new Error\(["'`]not implemented.*|todo!\(\)|unimplemented!\(\))$/i;
+const isStub = (code: string) => { const l = code.split("\n").map((x) => x.trim()).filter((x) => x && !/^(#|\/\/)/.test(x)); return !l.length || l.every((x) => STUB.test(x)); };
+
+/** Rewrites the body of function `fn` in `abs` with Copilot (signature and docstring kept); a stub result is retried
+ *  once with the task as a comment on the first body line (not written to the file). Returns the items to accept. */
+async function rewriteFunction(ls: Filler, abs: string, lang: string, fn: string, description: string, onlyStub = false): Promise<any[] | undefined> {
+  const text = readFileSync(abs, "utf8");
+  const def = new RegExp(`^([ \\t]*)(?:async\\s+)?(?:def|function|func|fn)\\s+${fn}\\b[^\\n]*\\n`, "m").exec(text);
+  if (!def) return undefined;
+  const indent = def[1];
+  let start = def.index + def[0].length;
+  // keep a Python docstring right after the signature
+  const doc = /^([ \t]+)("""|\'\'\')[\s\S]*?\2[ \t]*\n/.exec(text.slice(start));
+  if (doc) start += doc[0].length;
+  // the function ends at the next line indented no deeper than the signature (Python) or at the matching
+  // closing brace line at the signature's indent (brace languages)
+  const rest = text.slice(start).split("\n");
+  let end = rest.findIndex((l, i) => i > 0 && l.trim() && (lang === "python" ? !l.startsWith(indent + " ") && !l.startsWith(indent + "\t") : l.startsWith(indent + "}")));
+  if (end < 0) end = rest.length;
+  if (lang !== "python") end += 1;
+  while (end > 1 && !rest[end - 1].trim()) end--;   // blank lines after the body stay with the rest of the file
+  const suffix = "\n" + rest.slice(end).join("\n");
+  const prefix = text.slice(0, start);
+  // A stub body is written with the rest of the file hidden: Copilot otherwise copies the next stub
+  // (measured: "raise NotImplementedError" every time). The rest is put back when the file is written.
+  const stubbed = isStub(rest.slice(0, end).join("\n"));
+  if (onlyStub && !stubbed) return undefined;
+  let r = await fill(ls, abs, lang, prefix, stubbed ? "\n" : suffix, 6);
+  let body = r.text;
+  if (isStub(body)) {
+    // once more with the task as a comment above the body (not written to the file)
+    const note = `${indent}    ${COMMENT(lang)} ${description.replace(/\n/g, " ").slice(0, 200)}\n`;
+    r = await fill(ls, abs, lang, prefix + note, "\n", 6);
+    body = r.text;
+    if (isStub(body)) return undefined;
+  }
+  writeFileSync(abs, prefix + body + suffix.replace(/^\n/, ""));
+  return r.items;
+}
+
+/** The code skill's gate on the functions a Copilot step wrote (Python; contest-style requests, code written after a
+ *  failed check, or new code in a project with no tests). undefined: not gated or passed; otherwise a failed check
+ *  with the stress-test detail. */
+async function gateStep(ls: Filler, job: Job, step: JobStep, fns: string[], leaked: boolean): Promise<{ ok: false; label: string } | undefined> {
+  if (!step.path || !fns.length) return undefined;
+  const { gateJobCode } = await import("./code-skill.ts");
+  for (const fn of fns.slice(0, 2)) {
+    const g = await gateJobCode(ls, { request: job.request, work: job.workspace.work, abs: join(job.workspace.work, step.path), fn, leaked, fallback: false, unverified: !job.testCmd && !!job.codeRoute?.newCode }).catch(() => undefined);
+    if (g?.ran) step.notes.push(`stress_pass ${fn}: ${g.verdict} (${g.detail})`);
+    if (g && !g.keep) return { ok: false, label: `stress test: ${fn} ${g.detail}${g.counter ? `\n${g.counter}` : ""}` };
+  }
+  return undefined;
+}
+
+/** Pattern-dictionary notes for a contest-style job request (once per job; code skill option "patterns"). */
+const notesCache = new Map<string, string | undefined>();
+async function jobNotes(afm: AFMProvider, job: Job): Promise<string | undefined> {
+  if (notesCache.has(job.id)) return notesCache.get(job.id);
+  const { codeOptions } = await import("./code-skill.ts");
+  const { algorithmic } = await import("./codegen.ts");
+  const o = codeOptions();
+  let text: string | undefined;
+  if (o.patterns !== "off" && algorithmic({ prompt: job.request })) {
+    const { notesFor } = await import("./code-patterns.ts");
+    text = (await notesFor(afm, job.request).catch(() => undefined))?.text || undefined;
+  }
+  notesCache.set(job.id, text);
+  return text;
+}
+
+export async function runJob(afm: AFMProvider, job: Job, opts: { decima?: DecimaClient; onProgress?: (line: string) => void; copilot?: Filler } = {}): Promise<Job> {
   const say = (l: string) => opts.onProgress?.(l);
   if (!job.workspace.dir) {
     job.workspace = await makeWorkspace(job.id, job.root);
@@ -501,7 +666,14 @@ export async function runJob(afm: AFMProvider, job: Job, opts: { decima?: Decima
   job.status = "running"; saveJob(job);
   for (const step of job.steps.filter((s) => s.status === "pending")) {
     say(`${step.n}/${job.steps.length} ${step.action} ${step.path ?? ""} …`);
-    let res = step.action === "run_tests" ? { ok: true } : await doStep(afm, job, step);
+    // S5: with Copilot signed in, Copilot writes code steps first (its inline completion is unlimited) and AFM keeps
+    // the rest: tests (an independent check of Copilot's code), LaTeX, planning, repair. AFM's own attempt follows
+    // only if Copilot's code fails its check.
+    let cpFirst: { what: string; accept: () => void } | undefined;
+    if (opts.copilot && step.action !== "run_tests" && step.path && !isTestPath(step.path) && !isTex(step.path) && CODE_LANG[extname(step.path)])
+      cpFirst = await copilotStep(opts.copilot, job, step, "", undefined, await jobNotes(afm, job)).catch(() => undefined);
+    if (cpFirst) step.notes.push(`copilot: ${cpFirst.what}`);
+    let res = step.action === "run_tests" ? { ok: true } : cpFirst ? { ok: true } : await doStep(afm, job, step);
     if (!res.ok && step.action === "edit_file" && /old_text_not_(found|unique)/.test(res.error ?? "")) {
       step.notes.push(`edit failed (${res.error}); retried as insert`);
       step.action = "insert";
@@ -513,6 +685,11 @@ export async function runJob(afm: AFMProvider, job: Job, opts: { decima?: Decima
       const t = await runChecks(job);
       if (!t.ok) chk = t;
     }
+    // code skill gate (stress_pass): contest-style code Copilot wrote must also agree with a brute force on random
+    // inputs and finish on the worst case; a failure is a failed check, so AFM's repair and the rest follow
+    let gatedFns: string[] = [];
+    if (chk.ok && cpFirst) { const g = await gateStep(opts.copilot!, job, step, cpFirst.fns, false); if (g) { chk = g; gatedFns = cpFirst.fns; } }
+    if (chk.ok && cpFirst) cpFirst.accept();   // Copilot's code kept as written: reported as accepted, like an editor
     if (!chk.ok && step.action !== "run_tests") {
       // One repair attempt with the error output (AFM sees what went wrong).
       const fb = `${chk.label}: ${summarize(job, chk.result) || res.error || ""}`;
@@ -541,6 +718,25 @@ export async function runJob(afm: AFMProvider, job: Job, opts: { decima?: Decima
       }
       chk = res.ok ? await check(job, step.path) : { ok: false, label: res.error ?? "failed" };
       if (res.ok && chk.ok && job.testCmd && !job.steps.some((s) => s.n > step.n && s.action !== "run_tests")) { const t = await runChecks(job); if (!t.ok) chk = t; }
+      // AFM's repair of code the gate failed saw the counterexample: it is gated again (leaked)
+      if (chk.ok && gatedFns.length && opts.copilot) { const g = await gateStep(opts.copilot, job, step, gatedFns, true); if (g) chk = g; }
+    }
+    // Middle tier: a code step AFM could not get past its check (after the repair) is written by GitHub Copilot's
+    // inline completion, the editor feature that is unlimited on every plan, and checked the same way. Codex is
+    // only needed when this fails too.
+    if (!chk.ok && opts.copilot && step.action !== "run_tests" && step.path && !isTestPath(step.path) && !isTex(step.path) && CODE_LANG[extname(step.path)]) {
+      const cp = await copilotStep(opts.copilot, job, step, chk.label);
+      if (cp) {
+        const c2 = await check(job, step.path);
+        let ok2 = c2.ok;
+        if (ok2 && job.testCmd && !job.steps.some((s) => s.n > step.n && s.action !== "run_tests")) ok2 = (await runChecks(job)).ok;
+        // written after the check failed: the check's own output is no longer independent evidence (leaked)
+        if (ok2) { const g = await gateStep(opts.copilot, job, step, cp.fns, true); if (g && !g.ok) { ok2 = false; step.notes.push(g.label); } }
+        step.notes.push(`copilot: ${cp.what} — ${ok2 ? "check passed" : "check failed"}`);
+        if (ok2) { chk = c2; cp.accept(); }
+        else if (step.action === "create_file") rmSync(join(job.workspace.work, step.path), { force: true });
+        else await git(["checkout", "--", step.path], job.workspace.work);
+      }
     }
     if (step.action === "run_tests" && chk.ok && chk.result && job.steps.some((s) => s.action === "create_file" && isTestPath(s.path ?? "") && s.status === "done")) {
       const after = testCount(chk.result.output), before = (job as any).baselineTests;
@@ -561,6 +757,14 @@ export async function runJob(afm: AFMProvider, job: Job, opts: { decima?: Decima
     if (step.status === "failed") { job.status = "blocked"; break; }
   }
   if (job.status === "running") job.status = "done";
+  writeJobGraph(job);
+  // P5: the plan and its verdict (green: every step passed its checks)
+  if (job.status === "done" || job.status === "blocked") {
+    const verdict = job.status === "done" ? "green" : "red";
+    const plan = job.steps.map((st) => `${st.n}. ${st.action}${st.path ? ` ${st.path}` : ""}: ${st.description}${st.status === "failed" ? " [FAILED]" : ""}`).join("; ");
+    const source = job.steps.some((st) => st.notes.some((x) => x.startsWith("copilot:"))) ? "copilot" : "afm";
+    try { recordStrategy(job.kind === "latex" ? "writing" : "code", job.request, plan, verdict, source); strategyOutcome((job as any).strategyIds ?? [], verdict); } catch { /* memory is advisory */ }
+  }
   const stat = (await git(["diff", "--stat", job.workspace.base, "HEAD", "--", ".", ":!.afm-build"], job.workspace.dir)).out.trim();
   job.summary = stat;
   journal(job, `\n## Result: ${job.status}\n\`\`\`\n${stat}\n\`\`\`\nFor review: \`git -C ${job.workspace.dir} log --oneline ${job.workspace.base.slice(0, 10)}..HEAD\`\n`);
@@ -680,3 +884,41 @@ export function renderJob(job: Job, ko: boolean): string {
 export const jobsRoot = () => TREES;
 export const jobIdFrom = (s: string) => /\b(\d{8}-[0-9a-f]{6})\b/.exec(s)?.[1];
 export const hashOf = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 8);
+
+/** For a frontier caller (afm_code): Copilot writes `rel` in a scratch copy of that one file (a new file, or the
+ *  function named in `request`), and the change comes back as a unified diff with its syntax check; the project
+ *  is not touched. Suggestions are reported as shown, not accepted (the caller decides whether to apply them). */
+export async function copilotProposal(ls: Filler, root: string, rel: string, request: string): Promise<{ diff: string; syntax?: string; what: string } | undefined> {
+  const tmp = join(homedir(), "OnBud", "runtime", "tmp", `afm-code-${randomUUID().slice(0, 8)}`);
+  try {
+    const src = join(root, rel), dst = join(tmp, rel);
+    mkdirSync(dirname(dst), { recursive: true });
+    const before = existsSync(src) ? readFileSync(src, "utf8") : "";
+    if (before) writeFileSync(dst, before);
+    const job = { id: "afm-code", root, request, createdAt: now(), kind: "code", workspace: { kind: "copy", dir: tmp, work: tmp, branch: "", base: "" }, steps: [], status: "running", offline: false } as Job;
+    const step: JobStep = { n: 1, action: before ? "edit_file" : "create_file", path: rel, description: request, status: "pending", notes: [] };
+    const r = await copilotStep(ls, job, step, "", root);
+    if (!r) return undefined;
+    const d = await new Promise<string>((res) => execFile("diff", ["-u", "--label", `a/${rel}`, "--label", `b/${rel}`, before ? src : "/dev/null", dst], { maxBuffer: 4 * 1024 * 1024 }, (_e, out) => res(String(out ?? ""))));
+    const cmd = syntaxCheck(dst);
+    const syntax = cmd ? await new Promise<string | undefined>((res) => execFile("/bin/sh", ["-c", cmd], { timeout: 30_000 }, (e, out, err) => res(e ? (String(err) || String(out)).replaceAll(tmp + "/", "") : undefined))) : undefined;
+    return { diff: d, syntax, what: r.what };
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+}
+
+/** The job as a graph (skills plan P4), saved next to its journal: an edge only where a value crosses — a step
+ *  reads the file an earlier step wrote, a test step reads every code step before it. Steps with no edge between
+ *  them did not need to wait for each other; the record shows where a run could have been parallel. */
+export function jobGraph(job: Job): { nodes: { id: string; kind: string; path?: string; deps: string[]; status: string; attempts: number }[] } {
+  const nodes = job.steps.map((st, i) => {
+    const before = job.steps.slice(0, i);
+    const deps = st.action === "run_tests" ? before.filter((b) => b.action !== "run_tests").map((b) => `s${b.n}`)
+      : before.filter((b) => b.path && b.path === st.path || (isTestPath(st.path ?? "") && b.path && !isTestPath(b.path))).map((b) => `s${b.n}`);
+    const attempts = 1 + st.notes.filter((x) => /attempt \d+ failed|copilot: .*check failed/.test(x)).length;
+    return { id: `s${st.n}`, kind: st.action === "run_tests" ? "code" : "worker", path: st.path, deps, status: st.status, attempts };
+  });
+  return { nodes };
+}
+function writeJobGraph(job: Job) {
+  try { writeFileSync(join(jobDir(job.id), "graph.json"), JSON.stringify(jobGraph(job), null, 1), { mode: 0o600 }); } catch { /* a record only */ }
+}

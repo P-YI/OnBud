@@ -1,0 +1,65 @@
+{
+  "id": "git",
+  "version": "0.1.0",
+  "contract": "1.1",
+  "description": "Repository state, GitHub pull requests and checks (read-only), change summaries, commit messages, release notes, and the list/compare/apply/review of local jobs and background sessions.",
+  "examples": [
+    "What is the current git branch?",
+    "마지막 커밋 이후 바뀐 내용 요약해줘",
+    "작업 목록 보여줘"
+  ],
+  "reasonCodes": [
+    "local_git_overview",
+    "local_github_status",
+    "local_change_summary",
+    "local_commit_message",
+    "local_release_notes",
+    "local_diff_summary",
+    "local_jobs_list",
+    "local_jobs_compare",
+    "local_job_apply",
+    "local_job_review",
+    "local_job_discard",
+    "local_job_run",
+    "local_session_*"
+  ],
+  "capabilities": [
+    "read",
+    "propose",
+    "job",
+    "network"
+  ],
+  "lane": "wide",
+  "egress": "query",
+  "checks": [
+    "git_facts",
+    "reply_language"
+  ],
+  "budget": {
+    "afmCalls": 3,
+    "latencyMs": 30000,
+    "frontierCalls": 0
+  },
+  "entries": {
+    "commit_message": [
+      "Write a commit message for my staged changes",
+      "커밋 메시지 써줘"
+    ],
+    "change_summary": [
+      "Summarize what changed since the last commit",
+      "바뀐 내용 요약해줘"
+    ],
+    "release_notes": [
+      "Draft release notes from the recent commits",
+      "릴리스 노트 만들어줘"
+    ],
+    "git_overview": [
+      "Which branch am I on and is it ahead of origin?",
+      "이 저장소 브랜치 상태 어때?"
+    ],
+    "github_status": [
+      "Do my open pull requests pass CI?",
+      "내 PR 체크 상태 보여줘"
+    ]
+  }
+}

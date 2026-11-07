@@ -1,0 +1,1 @@
+{"id": "personal-off-by-default", "q": "What's on my calendar today?", "act": true, "root": "none", "expect": {"reasonCode": "skill_disabled", "lang": "any", "cited": false}}
