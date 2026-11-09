@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1024" viewBox="0 0 1200 1024" role="img" aria-label="OnBud architecture">
+<rect width="1200" height="1024" fill="#ffffff"/>
+<rect x="330" y="24" width="540" height="76" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="600" y="54" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#1f2328" text-anchor="middle">You</text>
+<text x="600" y="82" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#59636e" text-anchor="middle">⌥ Space panel · widget · Services menu · onbud:// · OpenCode (afm agent, MCP)</text>
+<line x1="600" y1="100" x2="600" y2="137" stroke="#59636e" stroke-width="1.6"/>
+<path d="M594,135 L600,144 L606,135 Z" fill="#59636e"/>
+<text x="612" y="127.0" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="400" fill="#59636e" text-anchor="start">127.0.0.1:11435 · token</text>
+<rect x="60" y="144" width="1080" height="168" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="600" y="176" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#1f2328" text-anchor="middle">OnBud controller</text>
+<text x="600" y="198" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="middle">Node.js · loopback only · no npm dependencies</text>
+<rect x="90" y="214" width="460" height="80" rx="12" fill="#fbefff" stroke="#8250df" stroke-width="1.2"/>
+<text x="320" y="244" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#8250df" text-anchor="middle">Safety first</text>
+<text x="320" y="268" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#59636e" text-anchor="middle">security gate · secret redaction · project-folder guard</text>
+<rect x="570" y="214" width="540" height="80" rx="12" fill="#ddf4ff" stroke="#0969da" stroke-width="1.2"/>
+<text x="840" y="244" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0969da" text-anchor="middle">Decision</text>
+<text x="840" y="268" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#59636e" text-anchor="middle">rules first → on-device skill pick → optional Decima router</text>
+<text x="840" y="286" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#59636e" text-anchor="middle">or ask you</text>
+<line x1="600" y1="312" x2="600" y2="345" stroke="#59636e" stroke-width="1.6"/>
+<path d="M594,343 L600,352 L606,343 Z" fill="#59636e"/>
+<rect x="60" y="352" width="1080" height="150" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="600" y="384" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#1f2328" text-anchor="middle">13 skills</text>
+<text x="600" y="406" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#59636e" text-anchor="middle">each declares what it may do and what may leave the Mac · a switch per skill in the Skills window</text>
+<rect x="144.0" y="422" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="204.0" y="442" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">core</text>
+<rect x="276.0" y="422" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="336.0" y="442" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">files</text>
+<rect x="408.0" y="422" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="468.0" y="442" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">code</text>
+<rect x="540.0" y="422" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="600.0" y="442" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">git</text>
+<rect x="672.0" y="422" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="732.0" y="442" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">writing</text>
+<rect x="804.0" y="422" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="864.0" y="442" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">mac</text>
+<rect x="936.0" y="422" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="996.0" y="442" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">security</text>
+<rect x="210.0" y="460" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="270.0" y="480" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">web</text>
+<rect x="342.0" y="460" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="402.0" y="480" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">frontier</text>
+<rect x="474.0" y="460" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="534.0" y="480" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">server</text>
+<rect x="606.0" y="460" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="666.0" y="480" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">convert</text>
+<rect x="738.0" y="460" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="798.0" y="480" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">shortcuts</text>
+<rect x="870.0" y="460" width="120" height="30" rx="15" fill="#ffffff" stroke="#0969da" stroke-width="1.1"/>
+<text x="930.0" y="480" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#0969da" text-anchor="middle">personal</text>
+<line x1="600" y1="502" x2="600" y2="535" stroke="#59636e" stroke-width="1.6"/>
+<path d="M594,533 L600,542 L606,533 Z" fill="#59636e"/>
+<rect x="60" y="542" width="1080" height="196" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="600" y="574" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#1f2328" text-anchor="middle">Models</text>
+<text x="600" y="596" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#59636e" text-anchor="middle">the on-device model plans and checks; the code ladder climbs only when a check fails</text>
+<rect x="90" y="612" width="300" height="112" rx="12" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="240" y="640" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16.5" font-weight="700" fill="#1a7f37" text-anchor="middle">Local LLM</text>
+<text x="240" y="661" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#1f2328" text-anchor="middle">Apple Foundation Model</text>
+<text x="240" y="681" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="middle">via apfel · 127.0.0.1:11434</text>
+<text x="240" y="699" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="middle">reads · summarizes · plans · checks</text>
+<text x="240" y="716" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#1a7f37" text-anchor="middle">stays on this Mac</text>
+<rect x="450" y="612" width="300" height="112" rx="12" fill="#fff1e5" stroke="#bc4c00" stroke-width="1.2"/>
+<text x="600" y="640" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16.5" font-weight="700" fill="#bc4c00" text-anchor="middle">Code LLM</text>
+<text x="600" y="661" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#1f2328" text-anchor="middle">GitHub Copilot (optional)</text>
+<text x="600" y="681" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="middle">inline completion, editor-paced</text>
+<text x="600" y="699" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="middle">writes code the checks can verify</text>
+<text x="600" y="716" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#bc4c00" text-anchor="middle">sends: code being completed</text>
+<rect x="810" y="612" width="300" height="112" rx="12" fill="#fff1e5" stroke="#bc4c00" stroke-width="1.2"/>
+<text x="960" y="640" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16.5" font-weight="700" fill="#bc4c00" text-anchor="middle">Frontier LLM</text>
+<text x="960" y="661" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="600" fill="#1f2328" text-anchor="middle">Codex via OpenCode (optional)</text>
+<text x="960" y="681" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="middle">cheap tier → strong tier</text>
+<text x="960" y="699" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="middle">hard cases · hand-offs you approve</text>
+<text x="960" y="716" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#bc4c00" text-anchor="middle">sends: a redacted capsule</text>
+<line x1="392" y1="668" x2="444" y2="668" stroke="#59636e" stroke-width="1.6" stroke-dasharray="4 3"/>
+<path d="M442,662 L450,668 L442,674 Z" fill="#59636e"/>
+<line x1="752" y1="668" x2="804" y2="668" stroke="#59636e" stroke-width="1.6" stroke-dasharray="4 3"/>
+<path d="M802,662 L810,668 L802,674 Z" fill="#59636e"/>
+<line x1="600" y1="738" x2="600" y2="771" stroke="#59636e" stroke-width="1.6"/>
+<path d="M594,769 L600,778 L606,769 Z" fill="#59636e"/>
+<rect x="60" y="778" width="1080" height="52" rx="12" fill="#fbefff" stroke="#8250df" stroke-width="1.2"/>
+<text x="600" y="810" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#8250df" text-anchor="middle">Your yes: commands · edits · web queries · local jobs · hand-offs   (irreversible actions are never automatic)</text>
+<line x1="600" y1="830" x2="600" y2="861" stroke="#59636e" stroke-width="1.6"/>
+<path d="M594,859 L600,868 L606,859 Z" fill="#59636e"/>
+<rect x="60" y="868" width="1080" height="110" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="600" y="900" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#1f2328" text-anchor="middle">Execution</text>
+<rect x="73.0" y="918" width="206" height="40" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="176.0" y="943" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#1f2328" text-anchor="middle">Spotlight · PDF/OCR · documents</text>
+<rect x="285.0" y="918" width="206" height="40" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="388.0" y="943" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#1f2328" text-anchor="middle">sandbox trial + your tests</text>
+<rect x="497.0" y="918" width="206" height="40" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="600.0" y="943" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#1f2328" text-anchor="middle">local jobs in git worktrees</text>
+<rect x="709.0" y="918" width="206" height="40" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="812.0" y="943" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#1f2328" text-anchor="middle">apps · terminal · Shortcuts</text>
+<rect x="921.0" y="918" width="206" height="40" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1.2"/>
+<text x="1024.0" y="943" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#1f2328" text-anchor="middle">your server over ssh</text>
+<path d="M1140,923 H1166 V254 H1118" fill="none" stroke="#59636e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<path d="M1120,248 L1111,254 L1120,260 Z" fill="#59636e"/>
+<text x="1180" y="590" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#59636e" text-anchor="middle" transform="rotate(90 1180 590)">checks (citations · tests · stress gate) → retry or move up the ladder · strategy memory</text>
+<rect x="60" y="990" width="14" height="14" rx="3" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="82" y="1002" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="start">stays on the Mac</text>
+<rect x="260" y="990" width="14" height="14" rx="3" fill="#fff1e5" stroke="#bc4c00" stroke-width="1.2"/>
+<text x="282" y="1002" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="start">leaves the Mac only with a plugin you turned on</text>
+<rect x="650" y="990" width="14" height="14" rx="3" fill="#fbefff" stroke="#8250df" stroke-width="1.2"/>
+<text x="672" y="1002" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#59636e" text-anchor="start">safety and approvals</text>
+</svg>

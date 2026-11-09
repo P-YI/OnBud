@@ -5,7 +5,7 @@
 <h3 align="center">Apple's on-device model, put to work on your own files.</h3>
 
 <p align="center">
-  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version 0.2.0"></a>
+  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.1-blue" alt="Version 0.2.1"></a>
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-26%20Tahoe%2B-000000?logo=apple&logoColor=white" alt="macOS 26 Tahoe+"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Apple%20silicon-M1%2B-555555?logo=apple&logoColor=white" alt="Apple silicon"></a>
   <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift"></a>
@@ -33,6 +33,13 @@ nothing leaves it unless you turn on a plugin that says so.
 | **Local agent** | 13 skill packs with contracts and switches, document reading with OCR, commands and edits behind approvals, LaTeX, local jobs, replies in nine languages |
 | **Plugins** | Router model (Ollaya + Decima), GitHub Copilot (writes code), Codex via OpenCode, web search (SearXNG), LaTeX (MacTeX), translation languages — each installed from its own project when you need it |
 | **OpenCode** | The same controller as an OpenCode agent (`afm`) and an MCP server for frontier agents |
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
+    <img src="docs/assets/architecture-light.svg" alt="OnBud architecture" width="100%">
+  </picture>
+</p>
 
 > [!NOTE]
 > **OnBud is an independent open-source project.** It is not made, endorsed, sponsored or supported by Apple
@@ -67,7 +74,7 @@ brew trust --cask p-yi/onbud/onbud      # Homebrew 7+: allow this one third-part
 brew install --cask p-yi/onbud/onbud
 ```
 
-**DMG:** download `OnBud-0.2.0.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
+**DMG:** download `OnBud-0.2.1.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
 OnBud to Applications.
 
 > [!NOTE]
@@ -239,7 +246,7 @@ setup: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Every benchmark setup and result, with the comparison to small open models |
 | [tools/bench/BENCHMARK.md](tools/bench/BENCHMARK.md) | How to run the benchmarks yourself |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building, testing, where things live, rollback |
-| [docs/release-notes-0.2.0.md](docs/release-notes-0.2.0.md) | What changed in 0.2.0 and how to upgrade · [0.1.0](docs/release-notes-0.1.0.md) |
+| [docs/release-notes-0.2.1.md](docs/release-notes-0.2.1.md) | What changed in 0.2.1 · [0.2.0](docs/release-notes-0.2.0.md) (and how to upgrade from 0.1.0) · [0.1.0](docs/release-notes-0.1.0.md) |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licenses of the projects, models and datasets OnBud uses or learned from |
 
 ## Apple Foundation Models, `fm` and licensing
