@@ -625,3 +625,55 @@ ended at Codex anyway). Decima, asked whether a problem was hard, scored at chan
   gate, exit codes; tmux checked by hand). Not yet run against a real server; Fresh's daemon `open-file` (to open
   a log at a line in a running Fresh) is a later step.
 
+
+## 32. Everyday requests from Spotlight (2026-11-10)
+
+The user reported three failures: "설정 앱의 vpn 항목 열어줘" answered `Settings/VPN`, while "Open the settings app." worked. "Let me know the time when the Codex token is reset." was answered from an unrelated letter on the Desktop.
+
+**Probe.** 40 everyday requests were run under Spotlight's conditions: root ~/Desktop, memory off. Act mode was used except for app launches and personal data (calendar, clipboard). The scripts were not committed.
+
+Failures before the fix:
+
+| Area | Requests and what went wrong |
+|---|---|
+| Arithmetic and units | 17% of 2,340 → 341.2; 3시간 45분 → 265분; 2^20 → 4,294,967,296; 100°F → 212 |
+| Clock | "지금 몇 시" escalated; the weekday was guessed |
+| General questions | Answered from unrelated Desktop files. "Who wrote Pride and Prejudice?" → Moby-Dick |
+| Translation | "Translate 'thank you for your help'…" showed the help table |
+| Writing | "Write a short polite email…" was read as the shell command `write` |
+| Shortcuts | "강제 종료 단축키" → ⌘Z |
+| Copilot | "How many Copilot requests do I have left?" was sent to Copilot chat |
+
+**Fixes.** All are code; no model was tuned.
+
+- **`quick_answer` (mac skill):** answers by code, with no model call:
+  - clock and date, days until or after a date
+  - arithmetic (a safe parser), percent of, discount, percent change
+  - unit conversions: length, mass, temperature, volume, area (평), speed, data, time
+  - macOS shortcuts (a fixed table)
+  - this Mac's local IP
+- **Settings panes:** System Settings panes open through `x-apple.systempreferences:<id>`. There are 36 panes; ids were checked against /System/Library/ExtensionKit on macOS 27.2. A Wi-Fi password request opens the Wi-Fi pane and points to Copy Password; the Keychain is never read.
+- **Codex usage:** read from the Codex CLI's own `~/.codex/sessions` token_count events (rate_limits only; auth files are never opened). The answer says when the values were logged.
+- **General questions:** a general question asked from a personal folder (home, Desktop, Documents, Downloads, or any folder without git or project files) is answered as chat. The folder is not read and triage is skipped (about 1 s saved). It uses its own prompt with a fixed reply language and gives the full text for writing requests.
+- **Short translation:** a quoted text plus a target language gets one call and a script check.
+- **Routing fixes:**
+  - Help words inside quotes are ignored.
+  - An English sentence is not a typed command.
+  - A how-to never runs mac_control.
+  - Copilot questions with "left / how many" read usage.
+  - "OnBud로 뭘 할 수 있어" opens help.
+- **File-type lists:** a list request that names a file type ("Desktop에 있는 PDF 목록") lists only that type, with names and metadata and no per-file description ("문서 나열해줘" still describes each file). Time went from 65 s to 14 s on the first run and 14 ms from the cache.
+
+**After.** Same probe, final run:
+
+| Area | Result |
+|---|---|
+| Quick answers | 15/15 correct (clock, arithmetic, units, shortcuts, IP); 1–20 ms each instead of 3–6 s |
+| Codex and Copilot usage | Correct |
+| General questions | 3–4.5 s, no files read. Correct: Austen, Canberra, Seoul, HTTP 404, DNS, recursion |
+| Translations | Japanese and English, about 0.5 s |
+| Live data | "Will it rain tomorrow?" says live data is needed |
+
+Still weak: AFM's short writing. The Slack message was one sentence, and the subject-line suggestion repeated its input. These are left for the writing skill or Copilot.
+
+Tests: everyday.test.ts (9 tests); skill eval cases in mac (+6) and core (+3).

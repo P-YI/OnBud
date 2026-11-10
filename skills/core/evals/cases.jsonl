@@ -13,3 +13,6 @@
 {"id": "core-lang-de-services", "family": "reply-language-multi", "q": "Erkläre in zwei Sätzen, was der Ordner services enthält.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "de", "langStrict": true}}
 {"id": "core-lang-pt-services", "family": "reply-language-multi", "q": "Explique em duas frases o que a pasta services contém.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "pt", "langStrict": true}}
 {"id": "core-lang-it-services", "family": "reply-language-multi", "q": "Spiega in due frasi cosa contiene la cartella services.", "root": "repo", "expect": {"answer": "controller|context|skill|adapter|memory|security", "lang": "it", "langStrict": true}}
+{"id": "core-general-in-home-en", "q": "Who wrote Pride and Prejudice?", "root": "home", "expect": {"answer": "Austen", "notAnswer": "Melville|Moby"}}
+{"id": "core-translate-quoted-help", "q": "Translate 'thank you for your help' into Japanese.", "root": "none", "expect": {"notAnswer": "Things to say|Command \\|", "reasonCode": "^(?!local_help)"}}
+{"id": "core-write-email-not-command", "q": "Write a short polite email declining a meeting tomorrow.", "root": "home", "expect": {"reasonCode": "^(?!explicit_command)", "notAnswer": "Run it\\?"}}

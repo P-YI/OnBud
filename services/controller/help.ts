@@ -57,6 +57,9 @@ const CATALOG: Record<Exclude<Topic, "all">, { title: { ko: string; en: string }
 };
 
 export function isHelpRequest(prompt: string): boolean {
+  // quoted text is content ("Translate 'thank you for your help'"), and "your help" is not a request for help
+  prompt = prompt.replace(/(["'“‘「])[^"'”’」\n]{1,200}(["'”’」])/g, " ").replace(/\b(your|for|my|his|her|their|any|some)\s+help\b/gi, " ");
+  if (/(what can (you|i|onbud) do|what (i|you) can do (with|in|using) onbud|what (does|can) onbud|(onbud|온버드|너|넌)\S{0,3}\s?(로|으로)?\s?(뭘|무엇을|뭐|무엇)\s?(할 수|해 줄 수|할수|도와)|(기능|할 수 있는 (것|일)).{0,6}(알려|보여|뭐야|소개|정리))/i.test(prompt)) return true;
   return /(명령어|커맨드|커멘드|사용법|도움말|쓰는 법|commands?\b|cheat ?sheet|usage|\bhelp\b|how (do|to) use)/i.test(prompt)
     || /^\s*git\s+[\w-]+.*(뭐야|설명|알려|무슨|뜻|what does|explain|meaning)/i.test(prompt) || /(설명|explain|뭐야|what does).*\bgit\s+[\w-]+/i.test(prompt);
 }

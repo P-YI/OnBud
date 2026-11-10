@@ -35,11 +35,14 @@ import { sha, type EditProposal } from "./edit-loop.ts";
 import { projectFiles } from "./jobs.ts";
 import { browserTab, convert, macControl, personal, shortcutsSkill } from "./mac-tasks.ts";
 import { serverIntent } from "../server/server-skill.ts";
+import { settingsPaneIntent, WIFI_PASSWORD } from "./settings-pane.ts";
+import { codexUsageIntent } from "./codex-usage.ts";
+import { quickAnswer } from "./quick-answer.ts";
 
 export type LocalSkill = "commit_message" | "change_summary" | "release_notes" | "error_triage" | "extract_table" | "translate" | "docstrings" | "privacy_scan" | "csv_json" | "sheet_lookup" | "slides_outline" | "git_overview" | "github_status" | "mac_health" | "open_app" | "security_check" | "launch_app" | "copilot"
-  | "convert" | "shortcuts" | "mac_control" | "browser_tab" | "personal" | "server";
+  | "convert" | "shortcuts" | "mac_control" | "browser_tab" | "personal" | "server" | "quick_answer";
 /** Skills that work without a project folder, and skills a delegated (read-only, MCP) task never runs. */
-export const NO_ROOT = new Set<LocalSkill>(["convert", "mac_health", "open_app", "security_check", "launch_app", "copilot", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
+export const NO_ROOT = new Set<LocalSkill>(["quick_answer", "convert", "mac_health", "open_app", "security_check", "launch_app", "copilot", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
 export const WRITES_FILES = new Set<LocalSkill>(["csv_json", "convert", "translate", "docstrings"]);
 export const NOT_DELEGATED = new Set<LocalSkill>(["open_app", "launch_app", "copilot", "convert", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
 export interface SkillContext { afm: AFMProvider; root: string; prompt: string; files: { path: string }[]; ko: boolean; history?: string; decima?: DecimaClient; timeoutMs?: number }
@@ -101,13 +104,20 @@ function detectByRules(prompt: string, files: { path: string }[]): LocalSkill | 
   if (/(릴리[스즈]\s?노트|release\s+notes?|changelog|변경\s?이력)/i.test(p)) return "release_notes";
   if ((/((변경\s?사항|변경된|바뀐|수정된|uncommitted|working tree|changes|diff).{0,30}(요약|정리|설명|summar|overview|describe))|(summari[sz]e|describe).{0,30}(changes|diff)/i.test(p)
       || /(what (did|have) (i|we) (change|changed|modif)|since the last commit|마지막 커밋 (이후|뒤|다음)|(뭘|뭐|무엇을?) (바꿨|고쳤|수정했))/i.test(p)) && !files.some((f) => !LOG_EXT.test(f.path) && TEXT_EXT.test(f.path))) return "change_summary";
+  // Codex's own limits and reset times (codex-usage.ts, read from the Codex CLI's logs): answered by the copilot skill
+  if (codexUsageIntent(p) && !/(copilot|코파일럿)/i.test(p) && !SECURITY_CHECK.test(p)) return "copilot";
   if (/(copilot|코파일럿)/i.test(p) && /(크레딧|credits?|quota|사용량|남은|한도|limit|usage|보내|물어|넘겨|맡겨|열어|ask|send|hand|chat|채팅)/i.test(p) && !/(사용법|how to|설정 방법)/i.test(p)) return "copilot";
   if (SECURITY_CHECK.test(p) && !GIT_HOWTO.test(p)) return "security_check";
+  // the clock, arithmetic and unit conversions: code, not the model (quick-answer.ts)
+  if (!files.length && quickAnswer(p, /[가-힣]/.test(p))) return "quick_answer";
   // a remote machine (skills/server): before "터미널 열어" so "gpu1 서버 터미널 열어줘" opens the server, not a local shell
   if (!HOWTO.test(p) && serverIntent(p)) return "server";
   if (OPEN_TERMINAL.test(p) || (OPEN_EDITOR.test(p) && files.length)) return "open_app";
+  // a System Settings pane ("설정 앱의 VPN 항목 열어줘", "open Bluetooth settings"; settings-pane.ts), before
+  // system controls and "<name> 열어줘" read the whole phrase as an app name
+  if (!files.length && (settingsPaneIntent(p) || WIFI_PASSWORD.test(p))) return "launch_app";
   // system controls before "<name> 켜줘" is read as an app to launch ("다크 모드 켜줘")
-  if (/(다크\s?모드|라이트\s?모드|dark mode|light mode|볼륨|음량|\bvolume\b|음소거|\b(un)?mute\b|스크린\s?샷|화면\s?캡처|screenshot|클립보드|clipboard)/i.test(p)) return "mac_control";
+  if (!HOWTO.test(p) && /(다크\s?모드|라이트\s?모드|dark mode|light mode|볼륨|음량|\bvolume\b|음소거|\b(un)?mute\b|스크린\s?샷|화면\s?캡처|screenshot|클립보드|clipboard)/i.test(p)) return "mac_control";
   if (!files.length && launchTarget(p)) return "launch_app";
   if (MAC_HEALTH.test(p) && !GIT_HOWTO.test(p)) return "mac_health";
   if (GH_REQ.test(p)) return "github_status";
@@ -143,8 +153,9 @@ export function routedSkillApplies(skill: LocalSkill, prompt: string, files: { p
     case "translate": case "privacy_scan": case "extract_table": return has(TEXT_EXT);
     case "error_triage": return has(LOG_EXT) || /(Traceback|Error:|Exception)/.test(prompt);
     case "open_app": return true;
-    case "launch_app": return !!launchTarget(prompt);
+    case "launch_app": return !!launchTarget(prompt) || !!settingsPaneIntent(prompt) || WIFI_PASSWORD.test(prompt);
     case "server": return serverIntent(prompt);
+    case "quick_answer": return !!quickAnswer(prompt, /[가-힣]/.test(prompt));
     default: return true;
   }
 }
@@ -177,6 +188,7 @@ export async function runLocalSkill(skill: LocalSkill, c: SkillContext): Promise
     case "mac_control": return macControl(c);
     case "browser_tab": return browserTab(c);
     case "personal": return personal(c);
+    case "quick_answer": { const { quickAnswer: qa } = await import("./quick-answer.ts"); const r = qa(c.prompt, c.ko); return r ? { answer: r.answer, verified: true, detail: `${r.kind} ${r.detail}` } : { answer: "", verified: false, detail: "none", declined: true }; }
     case "server": { const { serverSkill } = await import("../server/server-skill.ts"); return serverSkill(c); }
     case "commit_message": return commitMessage(c);
     case "change_summary": return changeSummary(c);
@@ -841,6 +853,7 @@ async function openApp(c: SkillContext): Promise<SkillResult> {
 
 // ---------------------------------------------------------------- any installed app
 async function launchApp(c: SkillContext): Promise<SkillResult> {
+  if (settingsPaneIntent(c.prompt) || WIFI_PASSWORD.test(c.prompt)) { const { openSettingsPane } = await import("./settings-pane.ts"); return openSettingsPane(c.prompt, c.ko); }
   const A = await import("../context-builder/apps.ts");
   const t = launchTarget(c.prompt)!;
   const K = c.ko;

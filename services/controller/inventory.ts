@@ -16,7 +16,7 @@ import { fileStamp, MemoryStore } from "../memory/memory.ts";
 
 const LIST_WORDS = /(나열|목록|리스트|정리|설명|요약|소개|뭐가|무엇이|어떤|살펴|훑어|list|describe|summari[sz]e|overview|inventory|what('?s| is| are)? (in|inside)|(what|which) (files|documents|papers)|show)/i;
 const DOC_WORDS = /(문서|파일|자료|논문|pdf|ppt|슬라이드|documents?|files?|papers?|slides?|folder contents)/i;
-const DIR_WORDS = /(디렉토리|디렉터리|폴더|여기|이 곳|현재|directory|folder|here|this (dir|folder)|in this)/i;
+const DIR_WORDS = /(디렉토리|디렉터리|폴더|여기|이 곳|현재|바탕\s?화면|데스크톱|데스크탑|directory|folder|here|this (dir|folder)|in this|\bdesktop\b)/i;
 
 export function isInventoryRequest(prompt: string): boolean {
   return LIST_WORDS.test(prompt) && DOC_WORDS.test(prompt) && (DIR_WORDS.test(prompt) || /(나열|list|inventory)/i.test(prompt));
@@ -84,7 +84,14 @@ export interface InventoryDeps {
 
 export async function buildInventory(root: string, prompt: string, deps: InventoryDeps, maxDescribe = 15) {
   const dir = targetDir(prompt, root);
-  const { files, skipped } = walk(root, dir);
+  // A file type named ("PDF 목록") lists only that type, by names and metadata only (no per-file AFM description;
+  // "문서 나열해줘" still describes each document) (everyday probe: "Desktop에 있는 PDF 목록" took 65 s describing 15 files of any type).
+  const want: DocKind | undefined = /\bpdfs?\b/i.test(prompt) ? "pdf" : /(워드|\bword\b|\bdocx?\b)/i.test(prompt) ? "word" : /(슬라이드|ppt|파워포인트|slides?|keynote)/i.test(prompt) ? "slides"
+    : /(엑셀|시트|excel|sheets?|xlsx|csv)/i.test(prompt) ? "sheet" : /(이미지|사진|images?|photos?|png|jpe?g)/i.test(prompt) ? "image" : undefined;
+  if (want && /(목록|나열|리스트|\blist\b|뭐가 있|what('?s| is| are)? (in|inside))/i.test(prompt) && !/(요약|설명|소개|살펴|훑어|describe|summari[sz]e|overview|about)/i.test(prompt)) maxDescribe = 0;
+  const walked = walk(root, dir, want ? 400 : 40);
+  const files = want ? walked.files.filter((f) => kindOf(f) === want).slice(0, 40) : walked.files;
+  const skipped = want ? Math.max(0, walked.files.filter((f) => kindOf(f) === want).length - 40) + walked.skipped : walked.skipped;
   const korean = hasHangul(prompt);
   const items: InventoryItem[] = [];
   const order: DocKind[] = ["pdf", "word", "slides", "sheet", "text", "code", "image", "other"];

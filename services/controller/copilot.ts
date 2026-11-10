@@ -24,9 +24,11 @@ export async function copilotUsage(): Promise<CopilotUsage | undefined> {
   } catch { return undefined; }
 }
 
-const ASK_ONLY = /(크레딧|credits?|quota|사용량|남은|한도|limit|usage)/i;
+const ASK_ONLY = /(크레딧|credits?|quota|사용량|남은|남았|한도|limit|usage|remaining|\bleft\b|how many|how much|몇\s?(개|번))/i;
 export async function copilotSkill(c: SkillContext): Promise<SkillResult> {
   const K = c.ko;
+  const CU = await import("./codex-usage.ts");
+  if (CU.codexUsageIntent(c.prompt) && !/(copilot|코파일럿)/i.test(c.prompt)) return CU.codexUsageAnswer(CU.readCodexUsage(), K);
   if (ASK_ONLY.test(c.prompt) && !/(보내|넘겨|맡겨|send|hand)/i.test(c.prompt)) {
     const u = await copilotUsage();
     if (!u) return { answer: K ? "Copilot 사용량을 읽지 못했어요. 터미널에서 `gh auth login`으로 GitHub에 로그인돼 있는지 확인해 주세요." : "Could not read Copilot usage; check `gh auth login`.", verified: false, detail: "no_usage" };

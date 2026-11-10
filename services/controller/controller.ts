@@ -41,7 +41,7 @@ import { checkReferences, compileLatex, csvToLatexTable, findMainTex, fixUndefin
 import { fetchPage, isWebRequest, kindFor, webSearch, type WebKind } from "../context-builder/websearch.ts";
 import { isLongRunning, listSessions, readSession, renderSessions, stopSession } from "../context-builder/sessions.ts";
 import { detectTestCommand, diffOf, proposeEdit, sha, trialEdit, renderTrial, type EditProposal, type TrialResult } from "./edit-loop.ts";
-import { detectLocalSkill, NO_ROOT, NOT_DELEGATED, WRITES_FILES, routedSkillApplies, runLocalSkill, type LocalSkill } from "./local-skills.ts";
+import { detectLocalSkill, questionPart, NO_ROOT, NOT_DELEGATED, WRITES_FILES, routedSkillApplies, runLocalSkill, type LocalSkill } from "./local-skills.ts";
 import { frameQuestion, ignoredLine, relevantLines, translationWords, typeMismatch, type Frame } from "./question-frame.ts";
 import { toEnglish } from "../context-builder/translate.ts";
 import { copilotFiller } from "../frontier/copilot-ls.ts";
@@ -358,11 +358,69 @@ export function intentSeeds(prompt: string, files: { path: string }[], root?: st
 /** A shell command typed as the whole message: one line whose first word is an installed program (or a path to
  *  one), with no Korean, no question mark and no conversational words ("make me a sandwich" is not a command). */
 const CMD_DIRS = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".opencode", "bin"), join(homedir(), ".local", "bin"), join(homedir(), ".cargo", "bin")];
+/** The answer prompt for a general question (no files): the request itself is the task. */
+export const GENERAL_SYSTEM = [
+  "You are a helpful assistant running on the user's Mac. Answer the request directly from general knowledge.",
+  "Be concise: a sentence or a short list unless more is asked for. For a programming question, include a one-line code example.",
+  "If the request asks you to write a message or email, write the complete text the user can send as is (greeting, the point with a reason, a closing; 2 to 5 sentences). If it asks for suggestions or ideas, give that many distinct ones as a list.",
+  "There are no files or documents here; never mention documents, evidence or files.",
+  "If the answer needs live information (weather, news, prices, schedules) or private data you do not have, say so in one sentence and set needs_escalation to true.",
+].join("\n");
+
+const LANGS: [RegExp, string, RegExp | undefined][] = [
+  [/(japanese|일본어|일어)/i, "Japanese", /[\u3040-\u30ff]/], [/(korean|한국어|한글)/i, "Korean", /[가-힣]/],
+  [/(english|영어|영문)/i, "English", /^[^가-힣\u3040-\u30ff\u4e00-\u9fff]*$/], [/(chinese|중국어)/i, "Chinese", /[\u4e00-\u9fff]/],
+  [/(french|프랑스어|불어)/i, "French", undefined], [/(spanish|스페인어)/i, "Spanish", undefined], [/(german|독일어)/i, "German", undefined],
+];
+/** "Translate '<text>' into <language>" / "'<text>'를 <언어>로 번역해줘": the text and target, or undefined. */
+export function shortTranslation(prompt: string): { text: string; lang: string; check?: RegExp } | undefined {
+  const p = prompt.trim();
+  if (!/(translate|번역|옮겨|(으)?로\s?(말해|뭐라고|어떻게\s?말))/i.test(p) || /(문서|파일|document|\bfiles?\b|\.\w{2,5}\b)/i.test(p.replace(/["'“‘「][^"'”’」\n]*["'”’」]/g, ""))) return undefined;
+  const target = /(?:into|to|in)\s+(japanese|korean|english|chinese|french|spanish|german)\b|(일본어|일어|한국어|한글|영어|영문|중국어|프랑스어|불어|스페인어|독일어)\s?(?:로|으로)/i.exec(p);
+  if (!target) return undefined;
+  const q = /["'“‘「]([^"'”’」\n]{1,300})["'”’」]/.exec(p);
+  let text = q?.[1];
+  if (!text) { const m = /(?:translate|번역해\s?줘?|번역)\s*[:：]\s*(.+)$/i.exec(p) ?? /^(.+?)\s*(?:를|을)?\s*(?:일본어|영어|한국어|중국어|프랑스어|스페인어|독일어)\s?(?:로|으로)\s?번역/i.exec(p); text = m?.[1]?.trim(); }
+  if (!text || text.length > 300) return undefined;
+  const L = LANGS.find(([re]) => re.test(target[1] ?? target[2]))!;
+  return { text, lang: L[1], check: L[2] };
+}
+async function translateShort(afm: AFMProvider, prompt: string, timeoutMs: number): Promise<{ text: string; lang: string; verified: boolean; ms: number } | undefined> {
+  const t = shortTranslation(prompt);
+  if (!t) return undefined;
+  const schema = { type: "object", properties: { translation: { type: "string" } }, required: ["translation"], additionalProperties: false } as any;
+  let ms = 0;
+  for (let i = 0; i < 2; i++) {
+    const r = await afm.generate({ system: `Translate the user's text into natural ${t.lang}. Output only the ${t.lang} translation${i ? `, written in ${t.lang} script` : ""}.`, user: t.text, schema, maxTokens: 400, timeoutMs });
+    ms += r.latencyMs ?? 0;
+    const out = r.ok ? String((r.json as any).translation ?? "").trim() : "";
+    if (out && (!t.check || t.check.test(out)) && out !== t.text) return { text: `**${out}**`, lang: t.lang, verified: !!t.check, ms };
+  }
+  return undefined;
+}
+
+/** A folder that is not a project (no git repository above it, no project files in it): home, Desktop, Documents,
+ *  Downloads and the like, where most files have nothing to do with a general question. */
+export function personalFolder(root: string): boolean {
+  const H = homedir();
+  if (root === H || [/\/Desktop$/, /\/Documents$/, /\/Downloads$/].some((re) => re.test(root) && root.startsWith(H))) return true;
+  for (let d = root; d.startsWith(H) && d !== H; d = dirname(d)) if (existsSync(join(d, ".git"))) return false;
+  return !["package.json", "pyproject.toml", "setup.py", "Cargo.toml", "go.mod", "Makefile", "requirements.txt", "Package.swift", "main.tex", "README.md"].some((f) => existsSync(join(root, f)));
+}
+/** A question about the world, not about the user's files ("Who wrote…", "DNS가 뭐야", "파이썬 리스트 뒤집는 법"). */
+export function generalQuestion(prompt: string): boolean {
+  const p = questionPart(prompt);
+  if (p !== prompt || p.length > 300 || /[/\\~]\S|\.\w{2,5}\b/.test(p)) return false;   // attached text, paths, file names
+  return !/(파일|문서|폴더|디렉토리|논문|편지|서신|레터|보고서|원고|이력서|계약서|증명서|장학|오퍼|과제|발표|슬라이드|엑셀|시트|목록|명단|사진|이미지|다운로드|바탕\s?화면|데스크톱|여기|이\s?폴더|이\s?프로젝트|최근|저장된|열려\s?있는|내가\s?(쓴|만든|받은|저장)|\b(files?|documents?|docs|folders?|directory|paper|letter|report|thesis|resume|cv|contract|offer|scholarship|slides?|deck|spreadsheet|sheet|pdf|photos?|images?|downloads?|desktop|here|this (folder|project)|recent|saved|i (wrote|made|got|saved|received))\b)/i.test(p);
+}
+
 export function typedCommand(prompt: string): string | undefined {
   const t = prompt.trim().replace(/^\$\s+/, "");
   if (!t || t.includes("\n") || t.length > 200 || /[\uac00-\ud7a3?]/.test(t) || /\s(me|my|you|your|please|how|why|what|which|can|could|should|would|i|we|is|are)\b/i.test(` ${t}`)) return undefined;
   const head = /^([A-Za-z0-9_.~/-]+)(\s|$)/.exec(t)?.[1];
-  if (!head || /^(open|say|yes|no|true|false|test|time|which|find|help|hi|hello|ok|okay)$/i.test(head)) return undefined;
+  if (!head || /^(open|say|yes|no|true|false|test|time|which|find|help|hi|hello|ok|okay|write|tell|explain|translate|summarize|summarise|describe|draft|compose|list|show|give)$/i.test(head)) return undefined;
+  // an English sentence, not a command line ("Write a short polite email…", "Look up the weather")
+  if (/^[A-Z][a-z]+\s/.test(t) && /\s(a|an|the|to|for|about|of|into)\s/i.test(` ${t} `)) return undefined;
   const found = head.includes("/") ? existsSync(head.replace(/^~(?=\/)/, homedir())) : CMD_DIRS.some((d) => existsSync(join(d, head)));
   return found ? t : undefined;
 }
@@ -513,7 +571,7 @@ export class Controller {
     const t0 = Date.now();
     const steps: Step[] = [];
     if (task.onStep) { const push = steps.push.bind(steps); steps.push = (...s: Step[]) => { s.forEach((x) => task.onStep!(x)); return push(...s); }; }
-    const root = task.root ? resolve(task.root) : undefined;
+    let root = task.root ? resolve(task.root) : undefined;
     const proj = projectHash(root);
     const afm = this.tracked(taskId);
     const { text: prompt, found: secrets } = redact(task.prompt);
@@ -584,6 +642,26 @@ export class Controller {
         : `This skill (${id}) is turned off. Turn it on in OnBud Settings > Skills, or in \`~/OnBud/config/skills.json\`.` });
     if (ls && !enabled(skillOf(ls))) return disabled(skillOf(ls));
     if (ls) { const out = await runSkill(ls); if (out) return out; }
+
+    let general = false;
+    // 1a'. A general question asked from a personal folder (Spotlight's default is ~/Desktop): answered as chat,
+    // without reading that folder. Before: "Who wrote Pride and Prejudice?" was answered from an unrelated PDF
+    // (Moby-Dick), "When is the Codex token reset?" from an unrelated letter (everyday probe, 2026-11-09).
+    if ((!root || personalFolder(root)) && !files.length && !spans.length && generalQuestion(prompt)) {
+      steps.push({ kind: "scope", detail: root ? "general question: chat only, the folder is not read" : "general question" });
+      root = undefined;
+      general = true;
+    }
+
+    // 1a''. A short text to translate ("Translate 'thank you' into Japanese", "'고마워요'를 영어로 번역해줘"): one
+    // translation call and a script check (the general answer prompt answered in English, everyday probe).
+    if (general && health.ok) {
+      const tr = await translateShort(afm, prompt, this.budget.afmTimeoutMs);
+      if (tr) {
+        steps.push({ kind: "translate_text", detail: `${tr.lang}: ${tr.verified ? "script ok" : "script not checked/failed"}`, ms: tr.ms });
+        return finish({ status: "answered_local", outcomeClass: tr.verified ? "local_verified" : "local_unverified", reasonCode: "local_other", answer: tr.text });
+      }
+    }
 
     // 1b. Document/folder overview: deterministic pipeline, AFM only describes single files.
     if (!dangerous && isInventoryRequest(prompt)) {
@@ -885,7 +963,8 @@ export class Controller {
 
     // 2. AFM triage (schema-constrained; free-text sentinels proved unreliable)
     let selfEscalate = false;
-    if (health.ok) {
+    if (general) steps.push({ kind: "triage", detail: "skipped: general question (other)" });   // ~1 s saved; the type would be replaced anyway
+    else if (health.ok) {
       const t = await afm.generate({ system: this.policy.afmSystem, user: `Triage this request: ${prompt}`, schema: TRIAGE_SCHEMA, maxTokens: 150, timeoutMs: this.budget.afmTimeoutMs });
       steps.push({ kind: "triage", detail: t.ok ? JSON.stringify(t.json) : `failed:${t.failure}`, ms: t.latencyMs });
       if (t.ok) {
@@ -919,7 +998,7 @@ export class Controller {
     if (route === "LOCAL_AFM" && selfEscalate && root && files.length === 0) { route = "FRONTIER_GPT"; reasonCode = "afm_triage_escalate"; }
     if (route === "FRONTIER_CLAUDE") route = "FRONTIER_GPT";   // only the ChatGPT/Codex provider is configured
     steps.push({ kind: "route", detail: `${route}:${reasonCode}` });
-    const sys = systemFor(this.policy, taskType);
+    const sys = general ? { text: `${GENERAL_SYSTEM}\nReply in ${ko ? "Korean" : "English"}.`, skill: "general-chat" } : systemFor(this.policy, taskType);
     skill = sys.skill;
     this.tel.decision({ taskId, provider: d.provider, candidates, action: route, reasonCode, afmAvailable: health.ok, rawScores: d.rawScores,
       riskSignals: [dangerous ? "destructive_command" : "", secrets.length ? "secrets_redacted" : ""].filter(Boolean) });
@@ -1130,13 +1209,14 @@ export class Controller {
     }
 
     if (a.needs_escalation) {
+      if (general) return finish({ status: "answered_local", outcomeClass: "local_unverified", answer: a.answer, capsuleTokens: rendered.tokens });
       if (!root) {   // chat only: escalation would not help without files; answer + say what is missing
         const hint = ko ? "\n\n파일 내용이 필요한 질문이면 해당 폴더를 열고 다시 물어봐 주세요." : "\n\nIf this needs files, open that folder and ask again.";
         return finish({ status: "answered_local", outcomeClass: "local_unverified", answer: a.answer + hint, capsuleTokens: rendered.tokens });
       }
       return this.escalate(taskId, capsule, prompt, root, task, steps, finish, "afm_needs_escalation", taskType);
     }
-    let answer = a.assumptions.length ? `${a.answer}\n\n${ko ? "가정" : "Assumptions"}:\n${a.assumptions.map((x) => `- ${x}`).join("\n")}` : a.answer;
+    let answer = a.assumptions.length && !general ? `${a.answer}\n\n${ko ? "가정" : "Assumptions"}:\n${a.assumptions.map((x) => `- ${x}`).join("\n")}` : a.answer;
     if (bad.length) answer += `\n\n⚠ ${ko ? "확인되지 않은 경로" : "Unverified paths"}: ${bad.join(", ")}`;
     // Episodes only when grounded in files actually read and every cited path checked out; otherwise a
     // wrong answer would be recalled as "memory" next time and repeated (seen in testing).

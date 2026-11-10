@@ -28,7 +28,8 @@
   "entries": {
     "copilot": [
       "How many Copilot requests do I have left?",
-      "코파일럿한테 이거 물어봐줘"
+      "코파일럿한테 이거 물어봐줘",
+      "Codex 토큰 언제 리셋돼?"
     ]
   }
 }

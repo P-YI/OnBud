@@ -5,3 +5,9 @@
 {"id": "mac-health-ja", "family": "mac-health", "q": "Mac のバッテリーとディスクの状態を確認して", "root": "none", "expect": {"skill": "mac", "lang": "any"}}
 {"id": "mac-dark-mode-approval", "family": "mac-control", "act": true, "q": "다크 모드 켜줘", "root": "none", "expect": {"skill": "mac", "status": "ask_user"}}
 {"id": "mac-volume-approval-en", "family": "mac-control", "act": true, "q": "Set the volume to 20 percent", "root": "none", "expect": {"skill": "mac", "status": "ask_user"}}
+{"id": "quick-percent-en", "family": "quick-calc", "q": "17% of 2,340 is what?", "root": "home", "expect": {"skill": "mac", "reasonCode": "local_quick_answer", "answer": "397\\.8"}}
+{"id": "quick-time-ko", "family": "quick-calc", "q": "3시간 45분은 몇 분이야?", "root": "home", "expect": {"skill": "mac", "reasonCode": "local_quick_answer", "answer": "225"}}
+{"id": "quick-temp-ko", "family": "quick-units", "q": "화씨 100도는 섭씨로 몇 도야?", "root": "home", "expect": {"skill": "mac", "reasonCode": "local_quick_answer", "answer": "37\\.78"}}
+{"id": "quick-units-en", "family": "quick-units", "q": "5 km is how many miles?", "root": "home", "expect": {"skill": "mac", "reasonCode": "local_quick_answer", "answer": "3\\.1068"}}
+{"id": "quick-power-en", "family": "quick-calc", "q": "What's 2^20?", "root": "home", "expect": {"skill": "mac", "reasonCode": "local_quick_answer", "answer": "1,048,576"}}
+{"id": "settings-pane-readonly", "q": "설정 앱의 vpn 항목 열어줘", "root": "none", "expect": {"skill": "mac", "reasonCode": "read_only_app", "lang": "any"}}

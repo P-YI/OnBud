@@ -2,7 +2,7 @@
   "id": "mac",
   "version": "0.1.0",
   "contract": "1.1",
-  "description": "Opening apps, terminals and editors (the user's own choice, Ghostty included), launching apps by name, this Mac's health, command help, and running a command the user approves.",
+  "description": "Opening apps, terminals and editors (the user's own choice, Ghostty included), launching apps by name, this Mac's health, command help, and running a command the user approves, System Settings panes, and quick answers by code (clock, arithmetic, unit conversions).",
   "examples": [
     "Downloads 폴더에서 터미널 열어줘",
     "Check the health of my Mac",
@@ -16,7 +16,8 @@
     "command_needs_approval",
     "read_only_app",
     "explicit_command_*",
-    "local_mac_control"
+    "local_mac_control",
+    "local_quick_answer"
   ],
   "capabilities": [
     "read",
@@ -46,12 +47,19 @@
     ],
     "launch_app": [
       "Launch Safari",
-      "캘린더 앱 실행해줘"
+      "캘린더 앱 실행해줘",
+      "설정 앱의 VPN 항목 열어줘"
     ],
     "mac_control": [
       "Turn on dark mode",
       "볼륨 30으로 줄여줘",
       "Take a screenshot"
+    ],
+    "quick_answer": [
+      "지금 몇 시야?",
+      "What's 17% of 2,340?",
+      "5 km는 몇 마일이야?",
+      "How many days until Christmas?"
     ]
   }
 }
