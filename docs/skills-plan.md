@@ -677,3 +677,53 @@ Failures before the fix:
 Still weak: AFM's short writing. The Slack message was one sentence, and the subject-line suggestion repeated its input. These are left for the writing skill or Copilot.
 
 Tests: everyday.test.ts (9 tests); skill eval cases in mac (+6) and core (+3).
+
+## 33. The LaTeX file named by path (2026-11-11)
+
+**Report.** "Please compile the tex file into pdf in the following directory: ~/Downloads/…/proposal_v4.tex" was asked from Spotlight, whose root is ~/Desktop. It compiled another project's `main.tex` on the Desktop instead. It also listed about 70 "duplicate labels".
+
+**Cause.**
+- Paths are only matched inside the open folder, so the absolute path was not seen.
+- `findMainTex` then preferred any `main.tex` under the Desktop.
+- `checkReferences` read every .tex under the root: all the papers on the Desktop at once.
+
+**Fix.**
+- A .tex named by an absolute or ~/ path (`namedTexPath`, inside home only) is the target, with its folder as the LaTeX root. A path that does not exist is reported, not replaced by another file.
+- In a personal folder with several LaTeX documents and none named, OnBud asks which one.
+- References are checked over the document's own files only: main plus what it \input/\include/\subfile's, and the .bib files it names (`documentFiles`). The MCP `latex_check` does the same.
+- No edit proposal is made for a file outside the open folder, because proposals are applied relative to it.
+
+**Result.** The same request now compiles proposal_v4.tex in 2.1 s. tests/latex-target.test.ts was added; npm test 213/213.
+
+## 34. A path in the request is where every skill works (2026-11-11)
+
+**Problem.** Folder mix-ups kept coming back. Spotlight opens ~/Desktop, but until now only the convert skill and the LaTeX compile looked at a file named by path outside the open folder. Every other skill read the Desktop or answered from another file.
+
+**Rule** (`services/context-builder/explicit-paths.ts`, applied in the controller before any skill runs):
+- **Work folder:** a file or folder named by an absolute or ~/ path becomes the work folder: a file's own folder, or the common folder of several paths. Named files are passed to the skill as if they were in the open folder.
+- **Path matching:**
+  - Paths may contain spaces; the longest existing prefix of the next words is used.
+  - Korean particles ("…scores.csv에서") and quotes are handled.
+- **Privacy:**
+  - Paths must be inside home (or /Volumes).
+  - Hidden folders (~/.ssh, ~/.aws, …) are never used.
+  - Every file passes the security gate, so keys, .pem, .env and credentials stay closed. Such a path gets a plain refusal (`path_blocked`).
+- **Missing files:** a file path that does not exist is reported (`path_not_found`), not replaced by another file.
+- **Approvals:** a pending command, edit, job or hand-off is stored with the moved folder (`Outcome.workRoot`), so the approval runs where the work was done. csv_json now writes absolute paths into its command.
+- **Server skill:** its remote paths are excluded.
+
+Also fixed on the way:
+- translate took the source language as the target ("영어에서 한국어로" → English); it now uses the language marked by 로/으로/into/to.
+- translate rejects output that echoes the prompt or schema.
+
+**Probe.** Spotlight root ~/Desktop, files in a folder outside it, one with spaces. All of these found and used the named file:
+- summary
+- action-item table
+- CSV lookup
+- error triage
+- translation
+- folder listing
+- CSV → JSON (approval command with absolute paths)
+- privacy scan
+
+A missing file and ~/.ssh/config were refused plainly. Tests: tests/explicit-paths.test.ts; npm test 216/216; skill eval 55/55.

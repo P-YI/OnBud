@@ -5,7 +5,7 @@
 <h3 align="center">Apple's on-device model, put to work on your own files.</h3>
 
 <p align="center">
-  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.2-blue" alt="Version 0.2.2"></a>
+  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.3-blue" alt="Version 0.2.3"></a>
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-26%20Tahoe%2B-000000?logo=apple&logoColor=white" alt="macOS 26 Tahoe+"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Apple%20silicon-M1%2B-555555?logo=apple&logoColor=white" alt="Apple silicon"></a>
   <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift"></a>
@@ -74,7 +74,7 @@ brew trust --cask p-yi/onbud/onbud      # Homebrew 7+: allow this one third-part
 brew install --cask p-yi/onbud/onbud
 ```
 
-**DMG:** download `OnBud-0.2.2.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
+**DMG:** download `OnBud-0.2.3.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
 OnBud to Applications.
 
 > [!NOTE]
@@ -127,11 +127,13 @@ may do and what may leave the Mac; a skill eval checks every change against thos
 | web | web search after you approve the query; the pages read are cited | read, network | the approved query | Web search (SearXNG) |
 | frontier | hand-offs you approve: Codex (read-only answer or its own worktree session), Copilot chat | read, cloud model | a redacted task capsule | Codex via OpenCode |
 | server | your GPU server or Slurm cluster over your own SSH: upload the project and run a command after approval, job state and logs, open the server in a terminal IDE | read, propose, run after approval, your server | project files (no secrets, nothing over 50 MB) and the approved command, to your server | Remote server (Fresh/TTT) |
-| convert | images (format, size, smaller files), PDF pages and merges, documents, zip — always into new files, also for files named by full path with no project open | read, write new files | nothing | macOS (sips, PDFKit, textutil) |
+| convert | images (format, size, smaller files), PDF pages and merges, documents, zip — always into new files | read, write new files | nothing | macOS (sips, PDFKit, textutil) |
 | shortcuts | list your Shortcuts, run one after approval, install from a vetted catalog | read, propose, run after approval | nothing | Shortcuts |
 | personal | Calendar events and Reminders, read-only — **off by default** | read | nothing (never stored, logged or handed off) | macOS Calendars / Reminders access |
 
-Commands, edits, web queries, jobs and hand-offs always wait for your "yes"; irreversible actions (send, delete,
+Name a file or folder by its path (absolute or `~/`, spaces allowed) and every skill works there, even when
+another folder is open; paths stay inside your home folder, hidden folders and secrets (keys, `.env`) are never
+read. Commands, edits, web queries, jobs and hand-offs always wait for your "yes"; irreversible actions (send, delete,
 pay) are never automatic. Answers follow the request's language (nine languages). Details:
 [docs/OVERVIEW.md](docs/OVERVIEW.md) · launcher: [apps/spotlight/README.md](apps/spotlight/README.md).
 
@@ -246,7 +248,7 @@ setup: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Every benchmark setup and result, with the comparison to small open models |
 | [tools/bench/BENCHMARK.md](tools/bench/BENCHMARK.md) | How to run the benchmarks yourself |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building, testing, where things live, rollback |
-| [docs/release-notes-0.2.2.md](docs/release-notes-0.2.2.md) | What changed in 0.2.2 · [0.2.1](docs/release-notes-0.2.1.md) · [0.2.0](docs/release-notes-0.2.0.md) (and how to upgrade from 0.1.0) · [0.1.0](docs/release-notes-0.1.0.md) |
+| [docs/release-notes-0.2.3.md](docs/release-notes-0.2.3.md) | What changed in 0.2.3 · [0.2.2](docs/release-notes-0.2.2.md) · [0.2.1](docs/release-notes-0.2.1.md) · [0.2.0](docs/release-notes-0.2.0.md) (and how to upgrade from 0.1.0) · [0.1.0](docs/release-notes-0.1.0.md) |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licenses of the projects, models and datasets OnBud uses or learned from |
 
 ## Apple Foundation Models, `fm` and licensing

@@ -31,7 +31,9 @@
     "decima_run_verification",
     "afm_answer_*",
     "afm_tool_*",
-    "skill_*"
+    "skill_*",
+    "path_blocked",
+    "path_not_found"
   ],
   "capabilities": [
     "read",

@@ -430,10 +430,11 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
     } else {
       const out = await controller.handle({ prompt, root, history: history || undefined, frontEnd: "opencode", onStep });
       const edits = needsEdits(prompt, out.reasonCode);
-      if (out.status === "escalation_required") pending.set(key, { kind: "handoff", prompt, capsule: out.capsule ?? "", root, reason: out.reasonCode, at: Date.now(), sessionID, edits });
-      if (out.pendingCommand) pending.set(key, { kind: "command", prompt, capsule: out.capsule ?? "", root, reason: out.reasonCode, command: out.pendingCommand, background: out.background, at: Date.now() });
-      if (out.pendingEdit) pending.set(key, { kind: "edit", prompt, capsule: "", root, reason: out.reasonCode, edit: out.pendingEdit.edit, testCmd: out.pendingEdit.testCmd, at: Date.now() });
-      if (out.pendingJob) pending.set(key, { kind: "job", prompt, capsule: "", root, reason: out.reasonCode, job: out.pendingJob, at: Date.now(), sessionID });
+      const wr = out.workRoot ?? root;   // a path named in the request moved the work there
+      if (out.status === "escalation_required") pending.set(key, { kind: "handoff", prompt, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, at: Date.now(), sessionID, edits });
+      if (out.pendingCommand) pending.set(key, { kind: "command", prompt, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, command: out.pendingCommand, background: out.background, at: Date.now() });
+      if (out.pendingEdit) pending.set(key, { kind: "edit", prompt, capsule: "", root: wr, reason: out.reasonCode, edit: out.pendingEdit.edit, testCmd: out.pendingEdit.testCmd, at: Date.now() });
+      if (out.pendingJob) pending.set(key, { kind: "job", prompt, capsule: "", root: wr, reason: out.reasonCode, job: out.pendingJob, at: Date.now(), sessionID });
       if (out.pendingWeb) pending.set(key, { kind: "web", prompt, capsule: "", root, reason: out.reasonCode, web: out.pendingWeb, at: Date.now() });
       if (out.revealPaths?.length) pending.set(key, { kind: "reveal", prompt, capsule: "", root, reason: out.reasonCode, paths: out.revealPaths, at: Date.now() });
       text = render(out, (Date.now() - t0) / 1000, !root, ko, !!sessionID, edits);

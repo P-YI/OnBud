@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { execCommand, type CommandResult } from "./terminal.ts";
 
 const TEXBIN = "/Library/TeX/texbin";
@@ -36,12 +36,27 @@ function texFiles(root: string, max = 200): string[] {
 
 export function isLatexProject(root: string): boolean { return texFiles(root, 50).some((f) => f.endsWith(".tex")); }
 
+/** Root documents (\documentclass and \begin{document}) under `root`. */
+export function mainTexFiles(root: string): string[] {
+  return texFiles(root).filter((f) => f.endsWith(".tex")).filter((f) => {
+    try { const t = readFileSync(join(root, f), "utf8"); return /\\documentclass/.test(t) && /\\begin\{document\}/.test(t); } catch { return false; }
+  });
+}
+
+/** A .tex file named by an absolute or ~/ path in the request: { abs } if it exists inside the home folder,
+ *  { missing } if not; undefined when no such path is written. */
+export function namedTexPath(prompt: string, home = homedir()): { abs: string } | { missing: string } | undefined {
+  const m = /(?:^|[\s`'"(“‘:])((?:~\/|\/)[^\s`'"”’)]+?\.tex)(?=$|[\s`'"”’),.!?]|[가-힣])/i.exec(prompt);
+  if (!m) return undefined;
+  const abs = resolve(m[1].startsWith("~/") ? join(home, m[1].slice(2)) : m[1]).normalize("NFC");
+  if (!abs.startsWith(home + "/")) return { missing: m[1] };
+  try { return statSync(abs).isFile() ? { abs } : { missing: m[1] }; } catch { return { missing: m[1] }; }
+}
+
 /** The root document: has \documentclass and \begin{document}; prefers main.tex / paper.tex / the largest. */
 export function findMainTex(root: string, hint?: string): string | undefined {
   if (hint && /\.tex$/.test(hint) && existsSync(join(root, hint))) return hint;
-  const mains = texFiles(root).filter((f) => f.endsWith(".tex")).filter((f) => {
-    try { const t = readFileSync(join(root, f), "utf8"); return /\\documentclass/.test(t) && /\\begin\{document\}/.test(t); } catch { return false; }
-  });
+  const mains = mainTexFiles(root);
   const pref = mains.find((f) => /^(main|paper|thesis|manuscript)\.tex$/i.test(basename(f)));
   return pref ?? mains.sort((a, b) => statSync(join(root, b)).size - statSync(join(root, a)).size)[0];
 }
@@ -97,8 +112,31 @@ export async function compileLatex(root: string, main: string, timeoutMs = 180_0
 }
 
 /** Offline consistency checks over all .tex/.bib files (no compile needed). */
-export function checkReferences(root: string): { missingCites: string[]; unusedBib: string[]; undefinedRefs: string[]; duplicateLabels: string[]; bibFiles: string[] } {
-  const files = texFiles(root);
+/** The files one document is made of: `main` and what it \input/\include/\subfile's (recursively), and the .bib
+ *  files it names (\bibliography{a,b}, \addbibresource{x.bib}). Paths relative to `root`. */
+export function documentFiles(root: string, main: string): { tex: string[]; bib: string[] } {
+  const strip = (t: string) => t.replace(/(^|[^\\])%.*$/gm, "$1");
+  const tex: string[] = [], bib = new Set<string>();
+  const base = dirname(main);
+  const visit = (rel: string) => {
+    if (tex.includes(rel) || tex.length > 200) return;
+    let t: string; try { t = strip(readFileSync(join(root, rel), "utf8")); } catch { return; }
+    tex.push(rel);
+    for (const m of t.matchAll(/\\(?:input|include|subfile|import\{[^}]*\})\{([^}]+)\}/g)) {
+      const name = m[1].trim(), withExt = /\.tex$/.test(name) ? name : `${name}.tex`;
+      for (const cand of [join(base, withExt), join(dirname(rel), withExt)]) if (existsSync(join(root, cand))) { visit(cand); break; }
+    }
+    for (const m of t.matchAll(/\\(?:bibliography|addbibresource)(?:\[[^\]]*\])?\{([^}]+)\}/g))
+      for (const b of m[1].split(",").map((x) => x.trim()).filter(Boolean)) { const f = join(base, /\.bib$/.test(b) ? b : `${b}.bib`); if (existsSync(join(root, f))) bib.add(f); }
+  };
+  visit(main);
+  return { tex, bib: [...bib] };
+}
+
+export function checkReferences(root: string, main?: string): { missingCites: string[]; unusedBib: string[]; undefinedRefs: string[]; duplicateLabels: string[]; bibFiles: string[] } {
+  // With a main document: only its own files (a folder holding v1, v2, v3 of a paper is not one document).
+  const doc = main ? documentFiles(root, main) : undefined;
+  const files = doc ? [...doc.tex, ...doc.bib] : texFiles(root);
   const tex = files.filter((f) => f.endsWith(".tex")).map((f) => readFileSync(join(root, f), "utf8").replace(/(^|[^\\])%.*$/gm, "$1"));
   const bibs = files.filter((f) => f.endsWith(".bib"));
   const bibKeys = new Set(bibs.flatMap((f) => [...readFileSync(join(root, f), "utf8").matchAll(/@\w+\s*\{\s*([^,\s]+)\s*,/g)].map((m) => m[1])));

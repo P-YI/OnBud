@@ -142,7 +142,7 @@ async function call(name: string, a: any): Promise<string> {
       if (!texRoot) throw new Error("no project folder is known: pass `main` as an absolute path to the .tex file");
       const main = findMainTex(texRoot, hint);
       if (!main) throw new Error("no main .tex with \\documentclass and \\begin{document} in the project");
-      const refs = checkReferences(texRoot);
+      const refs = checkReferences(texRoot, main);
       if (a.compile === false) return JSON.stringify(refs, null, 1);
       const rep = await compileLatex(texRoot, main);
       return renderLatexReport(rep, texRoot, main, false, refs) + (rep.pdf ? `\nPDF: ${rep.pdf}` : "");

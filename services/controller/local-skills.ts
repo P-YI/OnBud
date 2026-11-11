@@ -416,8 +416,13 @@ async function translate(c: SkillContext): Promise<SkillResult> {
   const rel = c.files.find((f) => TEXT_EXT.test(f.path))!.path;
   const src = await text(c, rel, 30_000);
   if (!src) return { answer: c.ko ? `\`${rel}\`을 읽지 못했어요.` : `Could not read \`${rel}\`.`, verified: false, detail: "unreadable" };
-  const lang = /(영어|영문|English)/i.test(c.prompt) ? "English" : /(한국어|한글|Korean)/i.test(c.prompt) ? "Korean" : /(일본어|Japanese)/i.test(c.prompt) ? "Japanese" : "Chinese";
-  const ok = (s: string) => (lang === "English" ? hangulShare(s) < 0.05 : lang === "Korean" ? hangulShare(s) > 0.2 : true);
+  // the target is the language followed by 로/으로 or after into/to ("영어에서 한국어로" → Korean), else the first named
+  const tgt = /(영어|영문|한국어|한글|일본어|중국어)\s?(?:로|으로)|\b(?:into|to)\s+(English|Korean|Japanese|Chinese)\b/i.exec(c.prompt);
+  const word = tgt ? (tgt[1] ?? tgt[2]) : c.prompt;
+  const lang = /(영어|영문|English)/i.test(word) ? "English" : /(한국어|한글|Korean)/i.test(word) ? "Korean" : /(일본어|Japanese)/i.test(word) ? "Japanese" : "Chinese";
+  // a reply that echoes the prompt or the output schema is not a translation
+  const leak = (s: string) => /("type"\s*:\s*"object"|"properties"|JSON 형식|JSON format|Output only the translation)/i.test(s);
+  const ok = (s: string) => !leak(s) && (lang === "English" ? hangulShare(s) < 0.05 : lang === "Korean" ? hangulShare(s) > 0.2 : true);
   // Paragraphs (code blocks kept whole and untranslated); a paragraph at a time keeps AFM inside its window.
   const blocks = src.split(/(```[\s\S]*?```)/).flatMap((b) => (b.startsWith("```") ? [b] : b.split(/\n{2,}/)));
   const out: string[] = [];
@@ -431,7 +436,7 @@ async function translate(c: SkillContext): Promise<SkillResult> {
       t = str(j?.translation);
     }
     if (!t || !ok(t)) failed++;
-    out.push(t || b);
+    out.push(t && !leak(t) ? t : b);
   }
   return { verified: failed === 0, detail: `${blocks.length} blocks, ${failed} unchecked`,
     answer: `${c.ko ? `\`${rel}\` ${lang === "English" ? "영어" : lang === "Korean" ? "한국어" : lang} 번역` : `\`${rel}\` in ${lang}`}${blocks.length > 40 ? (c.ko ? " (앞부분 40개 단락)" : " (first 40 paragraphs)") : ""}:\n\n${out.join("\n\n")}${failed ? `\n\n_${c.ko ? `${failed}개 단락은 번역 확인에 실패해 원문을 남겼어요.` : `${failed} paragraph(s) kept in the original: the translation check failed.`}_` : ""}` };
@@ -554,13 +559,14 @@ print(f"wrote {len(rows)} records to {dst}")`;
 async function csvJson(c: SkillContext): Promise<SkillResult> {
   const done = /wrote (\d+) records to (\S+)/.exec(c.history ?? "");
   if (done) return { verified: true, detail: "converted", answer: c.ko ? `\`${done[2]}\`에 레코드 ${done[1]}개를 저장했어요.` : `Wrote ${done[1]} records to \`${done[2]}\`.` };
-  const src = /([\w./-]+\.(?:csv|json))\b/i.exec(c.prompt)?.[1];
+  // the file found for the request first (a ~/ or absolute path is already resolved to the work folder), then a name
+  const src = c.files.find((f) => /\.(csv|json)$/i.test(f.path))?.path ?? /([\w./-]+\.(?:csv|json))\b/i.exec(c.prompt)?.[1];
   if (!src || !existsSync(join(c.root, src))) return { answer: c.ko ? "변환할 CSV/JSON 파일을 찾지 못했어요." : "Could not find the CSV/JSON file to convert.", verified: false, detail: "no_source" };
   const toJson = extname(src).toLowerCase() === ".csv";
-  const named = [...c.prompt.matchAll(/([\w./-]+\.(?:csv|json))\b/gi)].map((m) => m[1]).find((x) => x !== src && extname(x).toLowerCase() === (toJson ? ".json" : ".csv"));
+  const named = [...c.prompt.matchAll(/(?<![~/\w])([\w.-]+\.(?:csv|json))\b/gi)].map((m) => m[1]).find((x) => x !== basename(src) && extname(x).toLowerCase() === (toJson ? ".json" : ".csv"));
   const dst = named ?? src.replace(/\.(csv|json)$/i, toJson ? ".json" : ".csv");
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const cmd = `python3 -I -c ${q(PY_CONVERT)} ${q(src)} ${q(dst)}`;
+  const cmd = `python3 -I -c ${q(PY_CONVERT)} ${q(join(c.root, src))} ${q(join(c.root, dst))}`;   // absolute: the approval may run elsewhere
   return { verified: true, detail: `${src} → ${dst}`, pendingCommand: cmd,
     answer: c.ko ? `\`${src}\`를 ${toJson ? "JSON 배열" : "CSV"}로 바꿔 \`${dst}\`에 저장할게요 (파이썬 표준 csv/json 모듈, 숫자는 숫자로).${existsSync(join(c.root, dst)) ? ` ⚠ \`${dst}\`가 이미 있어서 덮어써요.` : ""}\n\n실행할까요? (\`예\` / \`아니요\`)`
       : `Convert \`${src}\` to ${toJson ? "a JSON array" : "CSV"} in \`${dst}\` (Python csv/json, numbers kept as numbers).${existsSync(join(c.root, dst)) ? ` ⚠ \`${dst}\` exists and will be overwritten.` : ""}\n\nRun it? (\`yes\` / \`no\`)` };

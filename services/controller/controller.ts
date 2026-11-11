@@ -37,10 +37,12 @@ let packOf: Map<string, string> | undefined;
 const skillOf = (ls: string) => (packOf ??= new Map(loadRegistry().skills.flatMap((s) => Object.keys(s.entries ?? {}).map((e) => [e, s.id] as [string, string])))).get(ls) ?? "core";
 import { buildInventory, hasHangul, isInventoryRequest, renderInventory } from "./inventory.ts";
 import { findByName, findFiles, findFrame, isFindRequest, kindFromPrompt, nameTerms, renderFound, type FindFrame } from "../context-builder/finder.ts";
-import { checkReferences, compileLatex, csvToLatexTable, findMainTex, fixUndefinedMacro, hasTeX, maskLatex, unmaskLatex, isLatexProject, renderLatexReport, trialCompileCommand } from "../context-builder/latex.ts";
+import { checkReferences, compileLatex, csvToLatexTable, findMainTex, mainTexFiles, namedTexPath, fixUndefinedMacro, hasTeX, maskLatex, unmaskLatex, isLatexProject, renderLatexReport, trialCompileCommand } from "../context-builder/latex.ts";
 import { fetchPage, isWebRequest, kindFor, webSearch, type WebKind } from "../context-builder/websearch.ts";
 import { isLongRunning, listSessions, readSession, renderSessions, stopSession } from "../context-builder/sessions.ts";
 import { detectTestCommand, diffOf, proposeEdit, sha, trialEdit, renderTrial, type EditProposal, type TrialResult } from "./edit-loop.ts";
+import { explicitPaths, pathProblems, scopeFor } from "../context-builder/explicit-paths.ts";
+import { serverIntent } from "../server/server-skill.ts";
 import { detectLocalSkill, questionPart, NO_ROOT, NOT_DELEGATED, WRITES_FILES, routedSkillApplies, runLocalSkill, type LocalSkill } from "./local-skills.ts";
 import { frameQuestion, ignoredLine, relevantLines, translationWords, typeMismatch, type Frame } from "./question-frame.ts";
 import { toEnglish } from "../context-builder/translate.ts";
@@ -80,6 +82,8 @@ export interface Outcome {
   capsuleTokens?: number;
   steps: Step[];
   capsule?: string;           // handed to the frontier / user on escalation
+  workRoot?: string;          // the folder the work happened in when a path in the request moved it (explicit-paths.ts);
+                              // a pending command, edit or job runs there, not in the folder the request came from
   policyVersion: string;
   policyHash: string;
   skill?: string;
@@ -572,7 +576,7 @@ export class Controller {
     const steps: Step[] = [];
     if (task.onStep) { const push = steps.push.bind(steps); steps.push = (...s: Step[]) => { s.forEach((x) => task.onStep!(x)); return push(...s); }; }
     let root = task.root ? resolve(task.root) : undefined;
-    const proj = projectHash(root);
+    let proj = projectHash(root);
     const afm = this.tracked(taskId);
     const { text: prompt, found: secrets } = redact(task.prompt);
     if (secrets.length) steps.push({ kind: "redact", detail: secrets.join(",") });
@@ -586,8 +590,9 @@ export class Controller {
     let reasonCode = "";
     let taskType: TaskType = "other";
     let skill: string | undefined;
+    let movedTo: string | undefined;   // set when a path named in the request moves the work (explicit-paths.ts)
     const finish = (o: Partial<Outcome> & { status: Status; outcomeClass: OutcomeClass }): Outcome => {
-      const out: Outcome = { taskId, route, reasonCode, taskType, steps, skill, ...pv, ...o } as Outcome;
+      const out: Outcome = { taskId, route, reasonCode, taskType, steps, skill, ...(movedTo ? { workRoot: movedTo } : {}), ...pv, ...o } as Outcome;
       this.tel.endTask({ taskId, taskType: out.taskType, ...pv, skill: out.skill, status: out.status, outcomeClass: out.outcomeClass,
         reasonCode: out.reasonCode, capsuleTokens: out.capsuleTokens, latencyMs: Date.now() - t0 });
       logEvent({ taskId, event: "outcome", status: out.status, outcomeClass: out.outcomeClass, route: out.route, reasonCode: out.reasonCode, capsuleTokens: out.capsuleTokens, nSteps: steps.length });
@@ -595,7 +600,24 @@ export class Controller {
     };
 
     // 1. Deterministic inspection
+    // A file or folder named by an absolute or ~/ path is where the work happens, whatever folder is open
+    // (explicit-paths.ts: inside home, no hidden folders, the security gate on every file). Remote paths of the
+    // server skill are not local folders.
+    const named = serverIntent(prompt) ? [] : explicitPaths(prompt);
+    const scope = scopeFor(named);
+    const badPath = serverIntent(prompt) ? { blocked: [] as string[], missing: [] as string[] } : pathProblems(prompt, named);
+    if (badPath.blocked.length) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "path_blocked",
+      answer: ko ? `\`${badPath.blocked[0]}\`은(는) 보안상 읽지 않는 경로예요 (숨김 폴더, 키·인증서·.env 같은 비밀 파일). 다른 파일을 지정해 주세요.`
+        : `\`${badPath.blocked[0]}\` is not read for security (hidden folders and secret files such as keys, certificates and .env). Name another file.` });
+    if (badPath.missing.length && !named.length) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "path_not_found",
+      answer: ko ? `\`${badPath.missing[0]}\` 파일을 찾지 못했어요. 경로를 확인해 주세요.` : `\`${badPath.missing[0]}\` was not found; check the path.` });
+    if (scope && !(root && named.every((p) => p.abs === root || p.abs.startsWith(root + "/")))) {
+      steps.push({ kind: "scope", detail: `named path: ${scope.root.replace(homedir(), "~")}` });
+      root = movedTo = scope.root;
+      proj = projectHash(root);
+    }
     let files = root ? mentionedFiles(prompt, root) : [];
+    if (root) for (const p of named) if (!p.isDir && !files.some((f) => resolve(root!, f.path) === p.abs)) files.push({ path: relative(root, p.abs) });
     // No project folder: a conversion of files named by absolute or ~/ paths still runs (and only that skill).
     if (!root) { const hf = homeFiles(prompt); if (hf.length && detectLocalSkill(prompt, hf) === "convert") files = hf; }
     if (root && !files.length && /(문서|파일|논문|편지|서신|슬라이드|발표|보고서|원고|증명서|엑셀|시트|스프레드시트|목록|명단|파워포인트|프레젠테이션|document|file|paper|letter|slides|report|pdf|excel|sheet|spreadsheet|xlsx|csv|pptx?|presentation|deck)/i.test(prompt)) files = namedDocuments(prompt, root);
@@ -755,9 +777,19 @@ export class Controller {
       return finish({ status: "answered_local", outcomeClass: "local_verified", answer: renderFound(found, terms, ko), revealPaths: found.map((f) => f.path) });
     }
 
+    // A .tex file named by path ("compile /Users/me/Downloads/x/proposal_v4.tex"): that file and its folder, even
+    // outside the open folder. Before, the path was not seen from Spotlight's ~/Desktop and another project's
+    // main.tex was compiled, with references checked across every project on the Desktop (2026-11-11).
+    const texRef = namedTexPath(prompt);
+    let lroot = root, lmain: string | undefined;
+    if (texRef && /(latex|레이텍|\.tex\b|컴파일|빌드|compile|build|typeset|pdf|인용|참조|citation|reference|label)/i.test(prompt)) {
+      if ("missing" in texRef) { reasonCode = "latex_no_main"; return finish({ status: "ask_user", outcomeClass: "asked_user", answer: ko ? `\`${texRef.missing}\` 파일을 찾지 못했어요. 경로를 확인해 주세요.` : `\`${texRef.missing}\` was not found; check the path.` }); }
+      lroot = dirname(texRef.abs); lmain = basename(texRef.abs);
+      steps.push({ kind: "latex_target", detail: lroot === root ? lmain : `${lmain} (named path)` });
+    }
     // A LaTeX compile request in a folder with no LaTeX project: say so, instead of a generic answer that invented a
     // main file (skill eval writing-latex-no-main).
-    if (root && !dangerous && /(latex|레이텍|\.tex\b)/i.test(prompt) && /(컴파일|빌드|compile|build|typeset)/i.test(prompt) && !isLatexProject(root)) {
+    if (lroot && !dangerous && /(latex|레이텍|\.tex\b)/i.test(prompt) && /(컴파일|빌드|compile|build|typeset)/i.test(prompt) && !isLatexProject(lroot)) {
       reasonCode = "latex_no_main";
       return finish({ status: "ask_user", outcomeClass: "asked_user", answer: ko
         ? "이 폴더에는 LaTeX 문서(main .tex)가 없어요. 논문 폴더를 열고 다시 요청해 주세요."
@@ -765,21 +797,27 @@ export class Controller {
     }
     // 1c'. LaTeX papers (offline): compile + log summary, reference checks, CSV → table; errors get an AFM fix
     // proposal that is tried by compiling a sandbox clone (edit→test loop with latexmk as the test).
-    if (!dangerous && root && isLatexProject(root) && !enabled("writing")) return disabled("writing");
-    if (root && !dangerous && hasTeX() && isLatexProject(root)) {
+    if (!dangerous && lroot && isLatexProject(lroot) && !enabled("writing")) return disabled("writing");
+    if (lroot && !dangerous && hasTeX() && isLatexProject(lroot)) {
       const texNamed = files.find((f) => /\.tex$/.test(f.path))?.path;
       const wantsCompile = /(컴파일|빌드|compile|build|pdf\s?(로|를)?\s?(만들|생성|뽑)|typeset)/i.test(prompt);
       const wantsRefs = /(인용|참조|레퍼런스|\bbib|citation|reference|\\ref|\\cite|label)/i.test(prompt) && /(확인|체크|점검|검사|빠진|누락|check|verify|missing)/i.test(prompt);
-      const csv = files.find((f) => /\.(csv|tsv)$/.test(f.path));
+      const csv = lroot === root ? files.find((f) => /\.(csv|tsv)$/.test(f.path)) : undefined;
       if (csv && /(표|table|tabular)/i.test(prompt)) {
         reasonCode = "local_latex_table";
-        const table = csvToLatexTable(readFileSync(resolve(root, csv.path), "utf8").split("\n").slice(0, 60).join("\n"), "", `tab:${basename(csv.path).replace(/\.\w+$/, "").replace(/[^A-Za-z0-9]+/g, "-")}`);
+        const table = csvToLatexTable(readFileSync(resolve(lroot, csv.path), "utf8").split("\n").slice(0, 60).join("\n"), "", `tab:${basename(csv.path).replace(/\.\w+$/, "").replace(/[^A-Za-z0-9]+/g, "-")}`);
         return finish({ status: "answered_local", outcomeClass: "local_verified", answer: (ko ? `\`${csv.path}\`로 만든 표예요 (booktabs, 숫자 열은 오른쪽 정렬):` : `Table from \`${csv.path}\` (booktabs, numeric columns right-aligned):`) + "\n\n```latex\n" + table + "\n```" });
       }
       if (wantsCompile || wantsRefs) {
-        const main = findMainTex(root, texNamed);
+        const named = lmain ?? (lroot === root ? texNamed : undefined);
+        // a personal folder with several LaTeX projects and none named: ask instead of picking one
+        if (!named && root && lroot === root && personalFolder(root)) {
+          const dirs = [...new Set(mainTexFiles(root).map((f) => dirname(f)))];
+          if (dirs.length > 1) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "latex_no_main", answer: (ko ? "이 폴더에 LaTeX 문서가 여러 개 있어요. 어떤 파일을 컴파일할까요? 경로를 적어 주세요.\n\n" : "There are several LaTeX documents here. Which one? Give its path.\n\n") + mainTexFiles(root).slice(0, 8).map((f) => `- \`${f}\``).join("\n") });
+        }
+        const main = findMainTex(lroot, named);
         if (!main) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "latex_no_main", answer: ko ? "\\documentclass와 \\begin{document}가 있는 메인 .tex 파일을 찾지 못했어요. 파일 이름을 알려 주세요." : "No main .tex (with \\documentclass and \\begin{document}) found. Which file is it?" });
-        const refs = checkReferences(root);
+        const refs = checkReferences(lroot, main);   // this document and its \input files, not every .tex under the open folder
         if (!wantsCompile) {
           reasonCode = "local_latex_refs";
           const r = [
@@ -792,20 +830,20 @@ export class Controller {
         }
         reasonCode = "local_latex_compile";
         const ts = Date.now();
-        const rep = await compileLatex(root, main);
+        const rep = await compileLatex(lroot, main);
         this.tel.toolCall({ taskId, tool: "latex_compile", ok: rep.ok, durationMs: Date.now() - ts, resultChars: rep.errors.length });
-        let answer = renderLatexReport(rep, root, main, ko, refs);
+        let answer = renderLatexReport(rep, lroot, main, ko, refs);
         const first = rep.errors.find((e) => e.file && e.line && /\.tex$/.test(e.file));
-        if (!rep.ok && first && health.ok) {
-          const errFile = existsSync(resolve(root, first.file!)) ? first.file! : (existsSync(resolve(root, dirname(main), first.file!)) ? join(dirname(main), first.file!) : undefined);
+        if (!rep.ok && first && health.ok && lroot === root) {   // an edit proposal is applied relative to the open folder
+          const errFile = existsSync(resolve(lroot, first.file!)) ? first.file! : (existsSync(resolve(lroot, dirname(main), first.file!)) ? join(dirname(main), first.file!) : undefined);
           if (errFile) {
             // One line, not retyped text: a deterministic macro fix, else AFM returns the corrected line.
-            const content = readFileSync(resolve(root, errFile), "utf8");
+            const content = readFileSync(resolve(lroot, errFile), "utf8");
             const lines = content.split("\n");
             const lineText = lines[first.line! - 1] ?? "";
             let fixed: string | undefined;
             let why = "";
-            const macro = /Undefined control sequence/i.test(first.message) ? fixUndefinedMacro(root, lineText) : undefined;
+            const macro = /Undefined control sequence/i.test(first.message) ? fixUndefinedMacro(lroot, lineText) : undefined;
             if (macro) { fixed = macro.fixed; why = ko ? `알 수 없는 명령 \`\\${macro.from}\`을 가장 가까운 명령 \`\\${macro.to}\`로 바꿨어요.` : `Replaced the unknown \`\\${macro.from}\` with the closest known \`\\${macro.to}\`.`; }
             else {
               const fx = await afm.generate({ system: "You fix one line of LaTeX so it compiles. Change only the markup that causes the error; keep every word of the author's text.",
@@ -818,7 +856,7 @@ export class Controller {
               const newContent = [...lines.slice(0, first.line! - 1), fixed, ...lines.slice(first.line!)].join("\n");
               const edit: EditProposal = { path: errFile, oldText: lineText, newText: fixed, explanation: why, baseHash: sha(content) };
               const diff = await diffOf(errFile, content, newContent);
-              const testCmd = trialCompileCommand(root, main);
+              const testCmd = trialCompileCommand(lroot, main);
               answer += (ko ? `\n\n수정안: ${why}\n\n\`\`\`diff\n${diff}\n\`\`\`\n\n샌드박스 사본에 적용해서 다시 컴파일해 볼까요? 성공하면 실제 파일에 적용할지 한 번 더 물어봐요. (\`예\` / \`아니요\`)`
                 : `\n\nProposed fix: ${why}\n\n\`\`\`diff\n${diff}\n\`\`\`\n\nTry it in a sandbox copy and recompile? (\`yes\` / \`no\`)`);
               return finish({ status: "answered_local", outcomeClass: "local_unverified", isProposal: true, answer, pendingEdit: { edit, testCmd } });
