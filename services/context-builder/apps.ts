@@ -68,7 +68,11 @@ export async function chooseApp(kind: AppKind, prompt = ""): Promise<Chosen | un
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 /** Opens a terminal window in `cwd`, optionally running `command` there (then a login shell stays open). */
+/** Evals and probes: report the action without doing it (ONBUD_DRY_ACTIONS=1). */
+export const dryActions = () => process.env.ONBUD_DRY_ACTIONS === "1";
+
 export async function openTerminal(cwd: string, command: string | undefined, chosen: Chosen): Promise<boolean> {
+  if (dryActions()) return true;
   if (/ghostty/i.test(appName(chosen.app))) {
     const as = (t: string) => JSON.stringify(t);   // AppleScript string literal (same escapes for " and \\)
     const script = `tell application "Ghostty"\nset cfg to new surface configuration\nset initial working directory of cfg to ${as(cwd)}\n`
@@ -85,6 +89,7 @@ export async function openTerminal(cwd: string, command: string | undefined, cho
 
 /** Opens a file (or URL, for the browser) with the chosen app. */
 export async function openWith(target: string, chosen: Chosen): Promise<boolean> {
+  if (dryActions()) return true;
   return (await run("/usr/bin/open", ["-a", chosen.app, target])).code === 0;
 }
 
@@ -156,6 +161,7 @@ export async function findInstalledApp(query: string): Promise<{ app?: Installed
 }
 
 export async function launchApp(app: InstalledApp): Promise<boolean> {
+  if (dryActions()) return true;
   return (await run("/usr/bin/open", ["-a", app.path])).code === 0;
 }
 
@@ -172,6 +178,7 @@ export function vscodeCli(): string | undefined {
 
 /** Opens VS Code's Copilot chat in `folder` with the prompt (and files attached), in ask, edit or agent mode. */
 export async function copilotChat(prompt: string, folder: string | undefined, files: string[] = [], mode: "ask" | "edit" | "agent" = "agent"): Promise<boolean> {
+  if (dryActions()) return true;
   const cli = vscodeCli();
   if (!cli) return false;
   if (folder) await run(cli, [folder], 15_000);   // the project window first, so the chat runs in it
@@ -181,6 +188,7 @@ export async function copilotChat(prompt: string, folder: string | undefined, fi
 
 /** Opens a file at a line in VS Code or Cursor (their CLIs take -g file:line), else with `open -a`. */
 export async function openAt(file: string, line: number | undefined, chosen: Chosen): Promise<boolean> {
+  if (dryActions()) return true;
   const cli = join(chosen.app, "Contents", "Resources", "app", "bin", /cursor/i.test(chosen.app) ? "cursor" : "code");
   if (line && /(Visual Studio Code|Cursor)\.app$/.test(chosen.app) && existsSync(cli)) return (await run(cli, ["-g", `${file}:${line}`], 15_000)).code === 0;
   return openWith(file, chosen);

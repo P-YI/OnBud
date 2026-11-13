@@ -254,6 +254,7 @@ export function quickAnswer(prompt: string, ko: boolean, now = new Date()): Quic
   const p = prompt.trim();
   const sc = p.length <= 120 && !/\n/.test(p) ? shortcutAnswer(p, ko) : undefined;   // "숨김 파일 보는 단축키": a file word is fine here
   if (sc) return sc;
+  if (/^(please\s+)?(copy|remind|keep|set|start|put|say|send|email|make|create|wake|prevent|stop|ping|alert|notify|turn)\b|(클립보드|clipboard|복사|깨워|알려\s?줘\s?\d|타이머|timer|alarm|알람)/i.test(p)) return undefined;   // an action that uses a value, not a question   // an action that uses a value, not a question
   if (p.length > 120 || /\n/.test(p) || /(파일|문서|폴더|pdf|docx?|xlsx|csv|이\s?표|시트|sheet|file|document|folder|코드|code|함수|function|커밋|commit)/i.test(p)) return undefined;
   if (/(방법|사용법|어떻게|how (do|to|can|should) i)/i.test(p) && !/(how many|how much|몇|단축키|shortcut)/i.test(p)) return undefined;
   return networkAnswer(p, ko) ?? clockAnswer(p, ko, now) ?? unitsAnswer(p, ko) ?? calcAnswer(p);

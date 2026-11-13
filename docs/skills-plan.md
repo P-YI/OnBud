@@ -727,3 +727,103 @@ Also fixed on the way:
 - privacy scan
 
 A missing file and ~/.ssh/config were refused plainly. Tests: tests/explicit-paths.test.ts; npm test 216/216; skill eval 55/55.
+
+## 35. Do, don't describe: Mac actions in plain English (2026-11-13)
+
+**Report.** "Open the setting app and show bluetooth setting" was answered with how-to text instead of opening the pane.
+
+**Probe.** English action requests run end to end with `ONBUD_DRY_ACTIONS=1`. This new switch reports app, Finder, pane and terminal openings without doing them. Approval actions only propose a command, so nothing ran.
+
+**Why it kept happening.**
+1. **Brittle wording rules.** Each skill fires on a hand-written pattern for one wording. Polite forms ("Could you open Notes for me?"), compound requests ("Open Calendar app and show today"), singular nouns ("setting") and other verbs ("pull up", "start Spotify") missed.
+2. **Router picks were dropped.** The Decima router often picked the right skill, but the skill's own parser then could not extract the target, so the pick was dropped ("does not apply").
+3. **The fallback can only describe.** The last stop is AFM's answer prompt, which cannot act, so it writes instructions. Sometimes it claimed the action was impossible.
+4. **Missing actions:** volume up/down, brightness, lock, Wi-Fi/Bluetooth power, Trash, hidden files, quit an app, a folder in Finder. "Make it louder" was even read as the shell command `make`.
+
+**Fix (skills plus one loop step).**
+- **`plainRequest`:** strips politeness and padding before the rules. `launchTarget` takes the first clause of a compound request, "get X running", "pop open", and start/run for an app installed under that exact name.
+- **Settings:** singular setting/preference and more verbs (see, pull up, get me, I want the …). Distinctive pane names work without the word "settings" (Login Items, Wallpaper, VPN, …). "check for macOS updates" opens Software Update.
+- **New `mac_control` actions, all behind approval:**
+  - relative and min/max volume, silence
+  - brightness keys
+  - lock screen
+  - Wi-Fi power (networksetup)
+  - Bluetooth power: blueutil if installed, else the Bluetooth pane
+  - empty the Trash, flagged "cannot be undone"
+  - Finder's ⇧⌘. hidden-files toggle (`defaults write` + `killall` is refused by the gate)
+  - quit an app; a quit request for an app that is not installed says so
+
+  Finder folders open from `launch_app`.
+- **Step 1f, action picker:**
+  - **When it runs:** for an imperative request, or a short request that mentions a Mac noun. Questions and developer work are left out.
+  - **What AFM does:** picks one action from a closed enum with a target, and never acts itself.
+  - **What code does:** checks the pick (appearance vs brightness; a pane named in the request), writes the canonical request, and runs the skill with its usual checks and approval.
+  - **If the action can't be done:** the answer prompt must say so plainly and never claim it was done.
+- Document-word matching uses word boundaries ("wallpaper" is not "paper").
+
+**Measured** (dry run; nothing is opened or run):
+
+| Set | Requests | Acted correctly | Notes |
+|---|---|---|---|
+| 1, before | 45 | 28 | 17 answered with text |
+| 1, after | 45 | 45 | tuned on this set |
+| 2 | 30 | 30 | tuned on this set after a 19/30 first run |
+| 3, fresh | 25 | 17 | 1 wrong action: "turn down the brightness" lowered the volume |
+| 4, fresh | 25 | 22 | no text answers left except one |
+| 5, fresh | 20 | 18 | 0 text answers; 2 imprecise picks, fixed by the code checks |
+
+Each fresh set was run once before any change.
+
+**Cost:** rule hits take 1–80 ms; a picker hit takes about 1.5 s (one AFM call).
+
+**Remaining:** the picker can still choose a near action. Approval actions show the command first, so a wrong pick is visible before anything runs. Pane and app openings are immediate but harmless.
+
+Tests: tests/mac-actions.test.ts (6 tests); mac eval +4 approval cases; npm test 222/222; skill eval 59/59.
+
+## 36. Beyond the listed actions: recipes, AFM-written commands, the Shortcuts Gallery (2026-11-13)
+
+**Request.** Actions outside the fixed list should still be done locally, with AFM, instead of "I can't do that yet". A missing shortcut should come from the Gallery.
+
+**Can AFM do it alone?** Tested directly: AFM wrote one command for each of 20 open-ended requests.
+
+| Result | Count | Examples |
+|---|---|---|
+| Correct | 5 | |
+| Did not compile (AppleScript) | 10 | |
+| Compiled but did something else | 5 | `caffeinate -t 1h`; `open -a Safari -url`; "what's playing" → play a track; "remind me at 5pm" → set the system date |
+
+Free-form commands alone are not safe enough to run.
+
+**Design** (`services/controller/mac-recipes.ts`; controller step 1f now runs before the router):
+1. **One AFM pick** over the fixed actions and about 30 vetted recipes, or none. A near action counts as wrong.
+2. **Recipes.** AFM fills only that recipe's slots in a second call where every slot is required.
+   - Code checks the values: email and URL must appear in the request; folders stay inside home with no `..` or hidden parts; lengths are bounded; clock times and hours are converted by code.
+   - Code builds the command.
+   - Harmless recipes run at once: say, notify, open URL, music controls, mail draft, clipboard copy, keep awake, timer, and read-only lookups (uptime, battery, front and open apps, memory, folder size, file search).
+   - Recipes that create something ask first: note, reminder, folder, eject, display sleep.
+3. **Code checks on near picks:** skip → next track; size vs count; display vs appearance; an app that is not installed is not a launch.
+4. **None of the above → AFM writes one command.**
+   - Code runs `bash -n`, compiles each AppleScript with osacompile (one retry with the error), and applies the command gate.
+   - A read-only command runs at once.
+   - Anything else is shown as "AFM-written, not verified" and needs approval.
+   - A denied command is refused with the reason.
+5. **Shortcuts.** There is no API to download Gallery shortcuts. A missing shortcut ("run my Pomodoro shortcut", "get the Water Reminder shortcut") opens `shortcuts://gallery/search?query=…`, so adding it is one click in the Shortcuts app. Similar shortcuts the user already has are listed, along with what OnBud does itself (convert, timer, reminder, screenshot, Wi-Fi). No app-control permission is needed (shortcuts CLI and URL).
+6. **After approval,** a Mac-action command shows its result; the request is no longer handled again. Before, approving dark mode proposed it again.
+
+**Measured** (dry run; harmless recipes also run for real: notification, uptime, battery, folder size, music state):
+
+| Set | Requests | Result |
+|---|---|---|
+| Set A, first run | 20 | 18/20 mapped |
+| Set B, end to end | 20 | 15/20 → 20/20 after fixes |
+| Fresh set C, run once | 20 | 12/20 acted |
+| Fresh set D, run once | 20 | 13/20 acted |
+| Fresh set E, run once | 15 | 13/15 acted; 1 wrong value ("alarm for 7:30am" → 45 min, now computed by code) |
+
+The remaining misses are requests that never reached the action step: earlier rules or a narrow gate. The gate now also sends short requests that name a time, an app or a Mac thing to the picker.
+
+**Limits:**
+- macOS hides the Wi-Fi name (`<redacted>`) from command-line tools without Location access; the recipe says so.
+- The front-app and open-apps recipes use System Events, which asks for Automation permission the first time.
+
+Tests: tests/mac-recipes.test.ts (5): every recipe compiles and passes the gate, slot checks, times. npm test 227/227; skill eval 61/61.

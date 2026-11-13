@@ -5,7 +5,7 @@
 <h3 align="center">Apple's on-device model, put to work on your own files.</h3>
 
 <p align="center">
-  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.3-blue" alt="Version 0.2.3"></a>
+  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.4-blue" alt="Version 0.2.4"></a>
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-26%20Tahoe%2B-000000?logo=apple&logoColor=white" alt="macOS 26 Tahoe+"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Apple%20silicon-M1%2B-555555?logo=apple&logoColor=white" alt="Apple silicon"></a>
   <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift"></a>
@@ -74,7 +74,7 @@ brew trust --cask p-yi/onbud/onbud      # Homebrew 7+: allow this one third-part
 brew install --cask p-yi/onbud/onbud
 ```
 
-**DMG:** download `OnBud-0.2.3.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
+**DMG:** download `OnBud-0.2.4.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
 OnBud to Applications.
 
 > [!NOTE]
@@ -122,7 +122,7 @@ may do and what may leave the Mac; a skill eval checks every change against thos
 | code | edits tried in a sandbox with your tests, local code jobs on their own branch, docstrings, error triage, renames | read, propose, local jobs | code being completed (Copilot) or a redacted task (Codex), only when those are on | GitHub Copilot, Codex |
 | git | repository state, change summaries, commit messages, release notes, PRs and checks (read-only), local jobs | read, propose, local jobs | GitHub API queries | git, `gh` |
 | writing | LaTeX compile, error fixes, citation and reference checks, CSV → tables; short drafts; translation | read, propose | nothing | LaTeX, Translation languages |
-| mac | open apps, terminals, editors and System Settings panes; Mac health; dark mode, volume, screenshot; quick answers by code (time and dates, arithmetic, units, macOS shortcuts); commands you approve | read, propose, run after approval | nothing | your terminal / editor / browser |
+| mac | open apps, Finder folders, terminals, editors and System Settings panes; Mac health; dark mode, volume, brightness, lock screen, Wi-Fi, Bluetooth, Trash, hidden files, quit an app, screenshot; vetted recipes (timers, reminders, notes, music, mail drafts, …) and, beyond them, an on-device-written command that is checked and waits for your yes; quick answers by code (time and dates, arithmetic, units, macOS shortcuts) | read, propose, run after approval | nothing | your terminal / editor / browser |
 | security | secrets in the project and shell history, credential files, open ports; privacy scan of documents (masked) | read | nothing | – |
 | web | web search after you approve the query; the pages read are cited | read, network | the approved query | Web search (SearXNG) |
 | frontier | hand-offs you approve: Codex (read-only answer or its own worktree session), Copilot chat | read, cloud model | a redacted task capsule | Codex via OpenCode |
@@ -230,7 +230,7 @@ measures, run once per setup on the same day:
 | Codex cost (API-equivalent) | $0.19 | **$0.09** | $0.26 | $0.11 |
 | Time | 29 min | 13 min | 10 min | 7 min |
 
-Everyday file work stays on the Mac (framework eval 53/56 and skill eval 55/55, no Codex calls). For code, a
+Everyday file work stays on the Mac (framework eval 53/56 and skill eval 61/61, no Codex calls). For code, a
 ladder: GitHub Copilot writes what it can (contest-style code only when a bundled difficulty classifier calls it
 easy), Codex's cheap tier takes the rest, and its strong tier answers only when the cheap answer fails a check.
 Against v0.1.0: 8 tasks more, half the cost, less than half the time. Against Codex alone: about the same
@@ -248,7 +248,7 @@ setup: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Every benchmark setup and result, with the comparison to small open models |
 | [tools/bench/BENCHMARK.md](tools/bench/BENCHMARK.md) | How to run the benchmarks yourself |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building, testing, where things live, rollback |
-| [docs/release-notes-0.2.3.md](docs/release-notes-0.2.3.md) | What changed in 0.2.3 · [0.2.2](docs/release-notes-0.2.2.md) · [0.2.1](docs/release-notes-0.2.1.md) · [0.2.0](docs/release-notes-0.2.0.md) (and how to upgrade from 0.1.0) · [0.1.0](docs/release-notes-0.1.0.md) |
+| [docs/release-notes-0.2.4.md](docs/release-notes-0.2.4.md) | What changed in 0.2.4 · [0.2.3](docs/release-notes-0.2.3.md) · [0.2.2](docs/release-notes-0.2.2.md) · [0.2.1](docs/release-notes-0.2.1.md) · [0.2.0](docs/release-notes-0.2.0.md) (and how to upgrade from 0.1.0) · [0.1.0](docs/release-notes-0.1.0.md) |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licenses of the projects, models and datasets OnBud uses or learned from |
 
 ## Apple Foundation Models, `fm` and licensing

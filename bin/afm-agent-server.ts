@@ -389,7 +389,9 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
         } else {
           const r = await execCommand(waiting.command, cwd, { timeoutMs: 120_000 });
           telemetry.toolCall({ tool: "run_command_approved", ok: r.exitCode === 0, durationMs: r.ms, resultChars: r.output.length });
-          if (!waiting.root) text = "```\n" + renderResult(waiting.command, r).slice(0, 4000) + "\n```";
+          // A command a skill proposed for a Mac action (dark mode, a recipe, an AFM-written command) is the answer
+          // itself: show its result. Running the request again would only propose the same command again.
+          if (!waiting.root || /^(local_mac_control|local_mac_action|local_shortcuts)$/.test(waiting.reason ?? "")) text = (r.exitCode === 0 ? (ko ? "✅ 실행했어요." : "✅ Done.") : (ko ? `실행했지만 오류로 끝났어요 (종료 코드 ${r.exitCode}).` : `It ran but failed (exit ${r.exitCode}).`)) + (r.output.trim() ? "\n\n```\n" + r.output.trim().slice(0, 3000) + "\n```" : "");
           else {
             const out = await controller.handle({ prompt: waiting.prompt, root: waiting.root, frontEnd: "opencode",
               history: `${history}\nuser approved and the controller ran:\n${renderResult(waiting.command, r)}` });

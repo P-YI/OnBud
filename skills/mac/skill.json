@@ -2,7 +2,7 @@
   "id": "mac",
   "version": "0.1.0",
   "contract": "1.1",
-  "description": "Opening apps, terminals and editors (the user's own choice, Ghostty included), launching apps by name, this Mac's health, command help, and running a command the user approves, System Settings panes, and quick answers by code (clock, arithmetic, unit conversions).",
+  "description": "Opening apps, terminals and editors (the user's own choice, Ghostty included), launching apps by name, this Mac's health, command help, and running a command the user approves, System Settings panes, and quick answers by code (clock, arithmetic, unit conversions); other Mac actions through vetted recipes or a command the on-device model writes (compiled, gated, approved).",
   "examples": [
     "Downloads 폴더에서 터미널 열어줘",
     "Check the health of my Mac",
@@ -17,7 +17,8 @@
     "read_only_app",
     "explicit_command_*",
     "local_mac_control",
-    "local_quick_answer"
+    "local_quick_answer",
+    "local_mac_action"
   ],
   "capabilities": [
     "read",
@@ -53,7 +54,9 @@
     "mac_control": [
       "Turn on dark mode",
       "볼륨 30으로 줄여줘",
-      "Take a screenshot"
+      "Take a screenshot",
+      "Make it louder",
+      "Lock my screen"
     ],
     "quick_answer": [
       "지금 몇 시야?",

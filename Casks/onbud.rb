@@ -4,8 +4,8 @@
 #   brew install --cask p-yi/onbud/onbud
 # apps/spotlight/scripts/release.sh updates version and sha256 for each release.
 cask "onbud" do
-  version "0.2.3"
-  sha256 "ab9b2560fa0e4e25e723eb009d2ecf958925a35a67225a5c227de7cb73217474"
+  version "0.2.4"
+  sha256 "f45a70417efb63e9b1f4a75376dbf623d04837a8f90917910753d8bfa215a6fe"
 
   url "https://github.com/P-YI/OnBud/releases/download/v#{version}/OnBud-#{version}.dmg"
   name "OnBud"

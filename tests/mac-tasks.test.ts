@@ -63,8 +63,12 @@ test("shortcuts: never written by the model; running one needs approval and an e
   assert.equal(r.detail, "create_refused"); assert.equal(r.pendingCommand, undefined);
   const l = await shortcutsSkill({ root: "", prompt: "단축어 목록 보여줘", files: [], ko: true });
   assert.match(l.detail, /^list \d+$/);
+  // a missing shortcut: the Shortcuts Gallery is searched for it (dry here); nothing runs or installs
+  process.env.ONBUD_DRY_ACTIONS = "1";
   const x = await shortcutsSkill({ root: "", prompt: 'run the shortcut "No Such Shortcut 123"', files: [], ko: false });
-  assert.equal(x.detail, "not_found"); assert.equal(x.pendingCommand, undefined);
+  delete process.env.ONBUD_DRY_ACTIONS;
+  assert.equal(x.detail, "gallery_search No Such Shortcut 123"); assert.equal(x.pendingCommand, undefined);
+  assert.match(x.answer, /Shortcuts Gallery/);
 });
 
 test("mac control: every change waits for approval; clipboard is shown once, masked", async () => {

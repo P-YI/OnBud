@@ -2,7 +2,7 @@
   "id": "shortcuts",
   "version": "0.1.0",
   "contract": "1.1",
-  "description": "The user's Shortcuts: list them, run one by its exact name after approval, install one from the vetted catalogue (Apple's import dialog confirms). Shortcut actions are never written by the model.",
+  "description": "The user's Shortcuts: list them, run one by its exact name after approval, install one from the vetted catalogue (Apple's import dialog confirms); a shortcut the user does not have opens Apple's Shortcuts Gallery searched for it (adding is the user's click) and names what OnBud already does itself. Shortcut actions are never written by the model.",
   "examples": [
     "What shortcuts do I have?",
     "단축어 '택배조회' 실행해줘"
@@ -29,7 +29,8 @@
     "shortcuts": [
       "Show me my shortcuts",
       "단축어 목록 보여줘",
-      "Run my Share Wi-Fi shortcut"
+      "Run my Share Wi-Fi shortcut",
+      "Get the Water Reminder shortcut from the gallery"
     ]
   }
 }

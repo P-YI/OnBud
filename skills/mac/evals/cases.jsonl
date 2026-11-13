@@ -11,3 +11,9 @@
 {"id": "quick-units-en", "family": "quick-units", "q": "5 km is how many miles?", "root": "home", "expect": {"skill": "mac", "reasonCode": "local_quick_answer", "answer": "3\\.1068"}}
 {"id": "quick-power-en", "family": "quick-calc", "q": "What's 2^20?", "root": "home", "expect": {"skill": "mac", "reasonCode": "local_quick_answer", "answer": "1,048,576"}}
 {"id": "settings-pane-readonly", "q": "설정 앱의 vpn 항목 열어줘", "root": "none", "expect": {"skill": "mac", "reasonCode": "read_only_app", "lang": "any"}}
+{"id": "mac-louder-en", "family": "mac-actions-en", "act": true, "q": "Make it louder", "root": "none", "expect": {"skill": "mac", "status": "ask_user", "reasonCode": "local_mac_control", "answer": "volume up"}}
+{"id": "mac-brightness-down-en", "family": "mac-actions-en", "act": true, "q": "Turn down the brightness", "root": "none", "expect": {"skill": "mac", "status": "ask_user", "answer": "dimmer"}}
+{"id": "mac-lock-en", "family": "mac-actions-en", "act": true, "q": "Can you lock the computer?", "root": "none", "expect": {"skill": "mac", "status": "ask_user", "answer": "Lock the screen"}}
+{"id": "mac-trash-en", "family": "mac-actions-en", "act": true, "q": "Wipe the trash", "root": "none", "expect": {"skill": "mac", "status": "ask_user", "answer": "cannot be undone"}}
+{"id": "mac-recipe-reminder-en", "family": "mac-recipes-en", "act": true, "q": "Remind me to stretch at 4pm", "root": "none", "expect": {"skill": "mac", "status": "ask_user", "reasonCode": "local_mac_action", "answer": "Reminders"}}
+{"id": "mac-recipe-folder-en", "family": "mac-recipes-en", "act": true, "q": "Make a new folder on my Desktop called Reports", "root": "none", "expect": {"skill": "mac", "status": "ask_user", "answer": "mkdir -p"}}

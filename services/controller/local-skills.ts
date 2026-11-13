@@ -34,6 +34,7 @@ import { redact } from "../security/gate.ts";
 import { sha, type EditProposal } from "./edit-loop.ts";
 import { projectFiles } from "./jobs.ts";
 import { browserTab, convert, macControl, personal, shortcutsSkill } from "./mac-tasks.ts";
+import { findApp } from "../context-builder/apps.ts";
 import { serverIntent } from "../server/server-skill.ts";
 import { settingsPaneIntent, WIFI_PASSWORD } from "./settings-pane.ts";
 import { codexUsageIntent } from "./codex-usage.ts";
@@ -55,15 +56,50 @@ const GIT_HOWTO = /(사용법|명령어|어떻게\s?(써|사용|만들|하는|�
 // GitHub (pull requests, checks, workflow runs, issues): read with the signed-in gh CLI, never written.
 const GH_REQ = /(\bPRs?\b|pull requests?|풀\s?리퀘(스트)?|\bCI\b|github actions|workflow runs?|워크플로|(github|깃허브).{0,20}(이슈|issues?|체크|checks?|리뷰|reviews?|상태|status|빌드|build))/i;
 const SLIDE_NTH = /(\d+)\s?(번째|번|쪽|페이지|장)\s?(슬라이드|페이지|장)?|(첫|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s?번째|\bslide\s?#?(\d+)\b|\b(\d+)(st|nd|rd|th) slide\b|\b(first|second|third|fourth|fifth|last) slide\b|마지막\s?(슬라이드|장)/i;
+/** The request without politeness and padding, so one rule covers many wordings (English probe 2026-11-13:
+ *  "Could you open Notes for me?", "Please launch Xcode", "I want to …, open that setting" missed exact rules). */
+export function plainRequest(prompt: string): string {
+  let p = prompt.trim().replace(/[.!?。]+$/, "");
+  for (let i = 0; i < 3; i++) p = p
+    .replace(/^(hey|hi|ok(ay)?|so|um+|onbud)[,\s]+/i, "")
+    .replace(/^would you mind\s+|^(could|can|would|will) you( please)?\s+|^please\s+|^(i (want|need|would like) (you )?to|i'?d like (you )?to|let'?s|help me|let me)\s+|^go ahead and\s+|^just\s+/i, "")
+    .replace(/\s+(for me|please|now|right now|quickly|real quick|thanks|thank you)$/i, "")
+    .replace(/[,;]\s*(please|thanks)$/i, "")
+    .trim();
+  return p;
+}
+
 /** The app name in "<name> (앱) 열어줘/실행해줘/켜줘" or "open/launch <name> (app)", or undefined. Paths, URLs and
- *  folders are not apps; "start"/"run" count only with the word "app" ("run npm test" is a command). */
+ *  folders are not apps; "start"/"run" count with the word "app" or for an app installed under that exact name
+ *  ("Start Spotify"), never for a command ("run npm test"). "Open Calendar app and show today" → Calendar. */
 export function launchTarget(prompt: string): { name: string; explicit: boolean } | undefined {
-  const p = prompt.trim().replace(/[.!?。]+$/, "");
+  let p = plainRequest(prompt);
+  // a compound request: the first clause names the app ("Open Calendar app and show today")
+  p = p.replace(/\s*(,\s*|\s+)(and|then|to)\s+(show|go to|check|see|display|select|look at|switch to|open|find|search|play)\b.*$/i, "").replace(/\s*(하고|해서|한\s?다음|열고)\s.*$/, (m) => (/열고/.test(m) ? " 열어줘" : "")).trim();
   if (p.length > 60 || /[/\\]|https?:|\.\w{1,5}\b|폴더|디렉토리|folder|directory|파일|\bfiles?\b|터미널|terminal|세션|session/i.test(p)) return undefined;
   const ko = /^(.+?)\s*(앱|어플|어플리케이션|애플리케이션|프로그램)?\s*(을|를|좀)?\s*(열어|실행해|실행시켜|켜|띄워|시작해)\s*(줘|주세요|줄래|줄래요|봐)?$/.exec(p);
   if (ko) return { name: ko[1].replace(/\s*(을|를)$/, "").trim(), explicit: !!ko[2] };
-  const en = /^(?:please\s+)?(open|launch|start|run)\s+(?:the\s+|my\s+)?(.+?)(\s+app(?:lication)?)?(?:\s+please)?$/i.exec(p);
-  if (en && (/^(open|launch)$/i.test(en[1]) || en[3])) return { name: en[2].trim(), explicit: !!en[3] };
+  const run = /^(?:get|have)\s+(?:the\s+|my\s+)?(.+?)\s+(?:running|open|started|up)$/i.exec(p);
+  if (run && run[1].split(/\s+/).length <= 3) return { name: run[1].replace(/\s+app$/i, "").trim(), explicit: true };
+  const en = /^(open|launch|start|run|fire up|bring up|pop open)\s+(?:up\s+)?(?:the\s+|my\s+|a\s+)?(.+?)(\s+app(?:lication)?)?$/i.exec(p);
+  if (en && (/^(open|launch|fire up|bring up|pop open)$/i.test(en[1]) || en[3] || (en[2].split(/\s+/).length <= 3 && findApp(en[2].trim())))) return { name: en[2].trim(), explicit: !!en[3] || /^launch$/i.test(en[1]) };
+  return undefined;
+}
+// Mac actions done by code after approval (mac-tasks.ts macControl): volume up/down, brightness, lock, Wi-Fi and
+// Bluetooth power, empty the Trash, hidden files, quit an app.
+const MAC_ACTION = /(\bsilence\b|\bdim\b|all the way (up|down)|max(imum)? volume|(shut|switch|turn) off (the )?(wi-?fi|bluetooth)|disconnect from (the )?wi-?fi|connect to (the )?wi-?fi|clear (out )?(the |my )?trash|^(kill|force quit) \S.{0,30}$|\blouder\b|\bquieter\b|\bsofter\b|turn (it |the volume |the sound )?(up|down)\b|volume (up|down)|소리\s?(키워|올려|크게|줄여|낮춰|작게)|brighter|dimmer|screen (darker|dimmer|brighter)|brightness (up|down)|(increase|decrease|lower|reduce|raise) (the |screen )?brightness|밝기\s?(올려|높여|키워|내려|낮춰|줄여)|화면\s?(밝게|어둡게)|lock (my |the )?(screen|mac|computer)|화면\s?잠가|화면\s?잠금|(turn|switch) (on|off) (the )?(wi-?fi|bluetooth)|(turn|switch) (the )?(wi-?fi|bluetooth) (on|off)|(enable|disable) (the )?(wi-?fi|bluetooth)|(와이\s?파이|블루투스|wi-?fi|bluetooth)\s?(좀\s?)?(켜|꺼|끄)|(empty|wipe) (the |my )?trash|휴지통\s?비워|(show|hide|display|reveal) (the )?hidden files|숨김\s?파일\s?(보여|숨겨|표시)|^(quit|close|exit) (?!(the |this )?(window|tab|session))\S.{0,30}$|(앱|어플)?\s?(종료해|닫아)\s?줘?$)/i;
+/** A folder to show in Finder ("Open my Downloads folder", "다운로드 폴더 열어줘", "open ~/Projects"), or undefined.
+ *  A terminal or editor in that folder is open_app's. */
+export function finderFolder(prompt: string): string | undefined {
+  const p = plainRequest(prompt);
+  if (/(터미널|terminal|iterm|ghostty|warp|셸|shell|에디터|editor|vs\s?code|cursor|zed)/i.test(p) || !/^(open|show|reveal|go to|see|view|pop open|열어|보여)|(열어|보여)\s?(줘|주세요)?$/i.test(p)) return undefined;
+  const H = process.env.HOME ?? "";
+  const KNOWN: [RegExp, string][] = [[/(downloads?|다운로드)/i, "Downloads"], [/(desktop|바탕\s?화면|데스크톱|데스크탑)/i, "Desktop"], [/(documents|문서)/i, "Documents"],
+    [/(pictures|사진)/i, "Pictures"], [/(music|음악)/i, "Music"], [/(movies|동영상|영상)/i, "Movies"], [/(applications|응용\s?프로그램)/i, "/Applications"], [/(home|홈)/i, ""]];
+  const path = /(?:^|\s)((?:~|\/Users)\/[^\s'"`]+)/.exec(p)?.[1];
+  if (path) { const abs = path.startsWith("~") ? join(H, path.slice(1)) : path; try { if (statSync(abs).isDirectory()) return abs; } catch { /* not a folder */ } return undefined; }
+  if (!/(folder|폴더|디렉토리|directory)/i.test(p) && !/^(open|show)\s+(my\s+|the\s+)?(downloads|desktop|documents)$/i.test(p)) return undefined;
+  for (const [re, d] of KNOWN) if (re.test(p)) return d.startsWith("/") ? d : join(H, d);
   return undefined;
 }
 const SECURITY_CHECK = /((보안|security)\s?.{0,10}(점검|검사|진단|취약|감사|check|audit|scan|review)|(비밀번호|암호|패스워드|password|api\s?키|키|토큰|token|secrets?|시크릿|자격\s?증명|credentials?)\S*\s?.{0,12}(유출|노출|새|leak|exposed|exposure|점검|검사|스캔|scan)|secret scan|vulnerabilit|취약점|\b(leak(ed|s)?|exposed|hard-?coded)\s+(api\s)?(secrets?|keys?|tokens?|passwords?|credentials?))/i;
@@ -117,9 +153,10 @@ function detectByRules(prompt: string, files: { path: string }[]): LocalSkill | 
   // system controls and "<name> 열어줘" read the whole phrase as an app name
   if (!files.length && (settingsPaneIntent(p) || WIFI_PASSWORD.test(p))) return "launch_app";
   // system controls before "<name> 켜줘" is read as an app to launch ("다크 모드 켜줘")
-  if (!HOWTO.test(p) && /(다크\s?모드|라이트\s?모드|dark mode|light mode|볼륨|음량|\bvolume\b|음소거|\b(un)?mute\b|스크린\s?샷|화면\s?캡처|screenshot|클립보드|clipboard)/i.test(p)) return "mac_control";
-  if (!files.length && launchTarget(p)) return "launch_app";
-  if (MAC_HEALTH.test(p) && !GIT_HOWTO.test(p)) return "mac_health";
+  const toClipboard = /^(copy|put|paste|send)\b.{0,60}\b(to|into|on) (my |the )?clipboard|클립보드(에|로)\s?(복사|넣어)/i.test(plainRequest(p));
+  if (!HOWTO.test(p) && !toClipboard && (/(다크\s?모드|라이트\s?모드|dark mode|light mode|볼륨|음량|\bvolume\b|음소거|\b(un)?mute\b|스크린\s?샷|화면\s?캡처|screenshot|screen ?(capture|grab)|클립보드|clipboard)/i.test(p) || MAC_ACTION.test(plainRequest(p)))) return "mac_control";
+  if (!files.length && (launchTarget(p) || finderFolder(p))) return "launch_app";
+  if (MAC_HEALTH.test(p) && !GIT_HOWTO.test(p) && !/battery (level|percent(age)?|charge)|배터리\s?(잔량|몇\s?%|퍼센트)/i.test(p)) return "mac_health";
   if (GH_REQ.test(p)) return "github_status";
   if (GIT_STATE.test(p) && !GIT_HOWTO.test(p)) return "git_overview";
   if (/(docstring|독스트링|문서화\s?주석)/i.test(p) && /(추가|달아|넣어|써|작성|add|write|generate)/i.test(p) && has(/\.py$/)) return "docstrings";
@@ -133,9 +170,11 @@ function detectByRules(prompt: string, files: { path: string }[]): LocalSkill | 
   if (has(TEXT_EXT) && /(할\s?일|담당|마감|action items?|to-?dos?|deadlines?|owners?)/i.test(p) && /(표|테이블|table|목록|list|정리|추출|extract)/i.test(p)) return "extract_table";
   // P6: common Mac tasks (mac-tasks.ts); the router catches other wordings
   if (has(/\.(png|jpe?g|heic|heif|tiff?|gif|bmp|webp|pdf|txt|rtf|html?|docx?|odt)$/i) && /(변환|바꿔|convert|resize|크기|줄여|합쳐|합치|병합|merge|combine|압축|zip|compress|\b(turn|make|save|export)\b.{1,40}\b(into|as)\b|(으)?로\s?(만들어|저장))/i.test(p)) return "convert";
-  if (/(단축어|\bshortcuts?\b)/i.test(p) && /(목록|리스트|\blist\b|실행|돌려|\brun\b|설치|install|뭐\s?있|what|만들|생성|\b(create|make|new|build)\b)/i.test(p)) return "shortcuts";
+  if (/(단축어|\bshortcuts?\b)/i.test(p) && !/(단축키|keyboard shortcut)/i.test(p) && /(목록|리스트|\blist\b|실행|돌려|\brun\b|\buse\b|설치|install|받아|다운로드|download|\bget\b|추가|\badd\b|갤러리|gallery|뭐\s?있|what|만들|생성|\b(create|make|new|build)\b)/i.test(p)) return "shortcuts";
   if (/((current|this|open|front)\s+(browser\s+)?(tab|page)|(지금|현재)\s?(보고\s?있는|열린|열어\s?둔)\s?(탭|페이지|웹\s?페이지))/i.test(p)) return "browser_tab";
-  if (/(일정|캘린더|calendar|schedule|미리\s?알림|리마인더|reminders?)/i.test(p) && /(오늘|내일|이번\s?주|today|tomorrow|this week|뭐|what|보여|show|list|알려|있어)/i.test(p)) return "personal";
+  // reading the calendar and reminders; adding one is a Mac action (mac-recipes.ts reminder_new)
+  if (/(일정|캘린더|calendar|schedule|미리\s?알림|리마인더|reminders?)/i.test(p) && /(오늘|내일|이번\s?주|today|tomorrow|this week|뭐|what|보여|show|list|알려|있어)/i.test(p)
+    && !/^(add|create|make|set|new|put|schedule)\b|(추가|만들어|등록|넣어)/i.test(plainRequest(p))) return "personal";
   return undefined;
 }
 
@@ -153,7 +192,7 @@ export function routedSkillApplies(skill: LocalSkill, prompt: string, files: { p
     case "translate": case "privacy_scan": case "extract_table": return has(TEXT_EXT);
     case "error_triage": return has(LOG_EXT) || /(Traceback|Error:|Exception)/.test(prompt);
     case "open_app": return true;
-    case "launch_app": return !!launchTarget(prompt) || !!settingsPaneIntent(prompt) || WIFI_PASSWORD.test(prompt);
+    case "launch_app": return !!launchTarget(prompt) || !!settingsPaneIntent(prompt) || WIFI_PASSWORD.test(prompt) || !!finderFolder(prompt);
     case "server": return serverIntent(prompt);
     case "quick_answer": return !!quickAnswer(prompt, /[가-힣]/.test(prompt));
     default: return true;
@@ -861,7 +900,14 @@ async function openApp(c: SkillContext): Promise<SkillResult> {
 async function launchApp(c: SkillContext): Promise<SkillResult> {
   if (settingsPaneIntent(c.prompt) || WIFI_PASSWORD.test(c.prompt)) { const { openSettingsPane } = await import("./settings-pane.ts"); return openSettingsPane(c.prompt, c.ko); }
   const A = await import("../context-builder/apps.ts");
-  const t = launchTarget(c.prompt)!;
+  const folder = finderFolder(c.prompt);
+  if (folder) {
+    const ok = A.dryActions() || await new Promise<boolean>((res) => execFile("/usr/bin/open", [folder], { timeout: 10_000 }, (e) => res(!e)));
+    const where = folder.replace(process.env.HOME ?? "~", "~");
+    return { verified: ok, detail: `finder ${where}`, answer: ok ? (c.ko ? `Finder에서 \`${where}\`를 열었어요.` : `Opened \`${where}\` in Finder.`) : (c.ko ? `\`${where}\`를 열지 못했어요.` : `Could not open \`${where}\`.`) };
+  }
+  const t = launchTarget(c.prompt);
+  if (!t) return { answer: "", verified: false, detail: "no_app", declined: true };
   const K = c.ko;
   const r = await A.findInstalledApp(t.name);
   if (!r.app && !r.candidates.length) {

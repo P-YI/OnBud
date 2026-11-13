@@ -46,14 +46,20 @@ const PANES: { re: RegExp; pane: Pane }[] = [
   P(/일반|general|정보|about this mac/i, "com.apple.systempreferences.GeneralSettings", "GeneralSettings", "일반", "General"),
 ];
 
-const SETTINGS_WORD = /(시스템\s?설정|시스템\s?환경\s?설정|설정\s?앱|설정|환경\s?설정|system settings|system preferences|settings|preferences)/i;
-const OPEN_VERB = /(열어|띄워|보여|가\s?줘|이동|들어가|켜\s?줘|\bopen\b|\bshow\b|\bgo to\b|\btake me\b|\bbring up\b)/i;
+const SETTINGS_WORD = /(시스템\s?설정|시스템\s?환경\s?설정|설정\s?앱|설정|환경\s?설정|system settings?|system preferences?|\bsettings?\b|\bpreferences?\b|\bprefs\b)/i;
+const OPEN_VERB = /(열어|띄워|보여|가\s?줘|이동|들어가|켜\s?줘|\bopen\b|\bshow\b|\bgo to\b|\btake me\b|\bbring up\b|\bpull up\b|\bget me\b|\bsee\b|\bview\b|\baccess\b|\bnavigate\b|\bjump to\b|\bhead to\b|\bi (want|need)( to see)? the\b)/i;
 // another app's settings ("VS Code 설정", "Chrome settings") is not System Settings
 const OTHER_APP = /(vs\s?code|cursor|chrome|크롬|safari|사파리|slack|슬랙|xcode|opencode|codex|copilot|onbud|spotlight 앱|브라우저|browser|터미널|terminal|iterm|ghostty|zed|notion|노션|카카오|kakao)\s?(의\s?)?(설정|settings|preferences)/i;
 
 /** The System Settings pane a request asks to open; `pane` undefined = settings named but no known pane. */
+// panes whose name alone says System Settings ("open login items", "check for macOS updates")
+const DISTINCT = /(login items?|로그인\s?항목|software update|소프트웨어\s?업데이트|screen time|스크린\s?타임|touch\s?id|control center|제어\s?센터|wallpaper|배경\s?화면|\bvpn\b)/i;
 export function settingsPaneIntent(prompt: string): { pane?: Pane } | undefined {
   const p = prompt.trim();
+  if (/check (for )?(macos |software |system )?updates?|업데이트\s?(확인|있는지)/i.test(p) && p.length <= 80 && !OTHER_APP.test(p)) return { pane: PANES.find((x) => x.pane.en === "Software Update")!.pane };
+  if (!SETTINGS_WORD.test(p) && DISTINCT.test(p) && OPEN_VERB.test(p) && p.length <= 80 && !/(방법|어떻게|how (do|to|can))/i.test(p.replace(/\?.*$/, ""))) {
+    for (const { re, pane } of PANES) if (re.test(p)) return { pane };
+  }
   if (p.length > 80 || !SETTINGS_WORD.test(p) || !OPEN_VERB.test(p) || OTHER_APP.test(p)) return undefined;
   if (/(방법|어떻게|how (do|to|can)|사용법)/i.test(p)) return undefined;
   // changing a setting ("다크 모드 켜줘", "와이파이 꺼줘") is not opening a pane: only "켜줘" with the settings word
@@ -67,7 +73,7 @@ export function paneInstalled(p: Pane): boolean {
   return existsSync(`/System/Library/ExtensionKit/Extensions/${p.appex}.appex`);
 }
 
-const open = (url: string) => new Promise<boolean>((res) => execFile("/usr/bin/open", [url], { timeout: 10_000 }, (e) => res(!e)));
+const open = (url: string) => process.env.ONBUD_DRY_ACTIONS === "1" ? Promise.resolve(true) : new Promise<boolean>((res) => execFile("/usr/bin/open", [url], { timeout: 10_000 }, (e) => res(!e)));
 
 /** "와이파이 비밀번호 알려줘": the password is in the Keychain, shown only after Touch ID; open the Wi-Fi pane and say where. */
 export const WIFI_PASSWORD = /(와이\s?파이|wi-?fi|무선\s?랜).{0,12}(비밀\s?번호|비번|암호|password)/i;

@@ -41,9 +41,12 @@ import { checkReferences, compileLatex, csvToLatexTable, findMainTex, mainTexFil
 import { fetchPage, isWebRequest, kindFor, webSearch, type WebKind } from "../context-builder/websearch.ts";
 import { isLongRunning, listSessions, readSession, renderSessions, stopSession } from "../context-builder/sessions.ts";
 import { detectTestCommand, diffOf, proposeEdit, sha, trialEdit, renderTrial, type EditProposal, type TrialResult } from "./edit-loop.ts";
+import { settingsPaneIntent } from "./settings-pane.ts";
+import { localAction, RECIPES } from "./mac-recipes.ts";
+import { findApp } from "../context-builder/apps.ts";
 import { explicitPaths, pathProblems, scopeFor } from "../context-builder/explicit-paths.ts";
 import { serverIntent } from "../server/server-skill.ts";
-import { detectLocalSkill, questionPart, NO_ROOT, NOT_DELEGATED, WRITES_FILES, routedSkillApplies, runLocalSkill, type LocalSkill } from "./local-skills.ts";
+import { detectLocalSkill, plainRequest, questionPart, NO_ROOT, NOT_DELEGATED, WRITES_FILES, routedSkillApplies, runLocalSkill, type LocalSkill } from "./local-skills.ts";
 import { frameQuestion, ignoredLine, relevantLines, translationWords, typeMismatch, type Frame } from "./question-frame.ts";
 import { toEnglish } from "../context-builder/translate.ts";
 import { copilotFiller } from "../frontier/copilot-ls.ts";
@@ -362,6 +365,74 @@ export function intentSeeds(prompt: string, files: { path: string }[], root?: st
 /** A shell command typed as the whole message: one line whose first word is an installed program (or a path to
  *  one), with no Korean, no question mark and no conversational words ("make me a sandwich" is not a command). */
 const CMD_DIRS = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".opencode", "bin"), join(homedir(), ".local", "bin"), join(homedir(), ".cargo", "bin")];
+/** A request to do something on this Mac (imperative, not a question about how). */
+export function isActionRequest(prompt: string): boolean {
+  const p = plainRequest(questionPart(prompt));
+  if (p.length > 160 || /(how (do|can|to|should)|what is|what's|why|explain|방법|어떻게|뭐야|왜|설명)/i.test(p)) return false;
+  // developer work has its own routes (tests, builds, git, files, code)
+  // developer work has its own routes; a Mac verb first ("Read this out loud: the build passed", "Open the newest
+  // file in my Downloads") is still an action
+  const macVerb = /(out loud|aloud|^say\b|remind|ping me|notify|timer|clipboard|^open\b|^count\b|^draft\b|e-?mail)/i.test(p);
+  if (!macVerb && /\b(tests?|build|commit|git|push|pull(?! up)|deploy|merge|branch|diff|logs?|code|function|script|server|job|pr|issue|files?|documents?|table|summary|query)\b|테스트|빌드|커밋|브랜치|코드|함수|스크립트|서버|파일|문서|표|요약/i.test(p)) return false;
+  // a short request about something on this Mac ("Would you mind opening the Sound settings?", "Wipe the trash"):
+  // the picker decides, and answers "none" when it is not an action (fresh probe 2026-11-13: verb lists alone
+  // missed 8 of 25 new wordings)
+  const MAC_NOUN = /\b(settings?|preferences?|app|apps|screen|display|brightness|volume|sound|audio|trash|bin|wi-?fi|bluetooth|folder|finder|dark mode|light mode|mode|mac|computer|screenshot|screen ?capture|hidden files)\b|설정|화면|밝기|소리|볼륨|음량|휴지통|와이파이|블루투스|폴더|모드|맥|스크린샷|캡처/i;
+  if (p.split(/\s+/).length <= 12 && MAC_NOUN.test(p) && !/^(what|why|when|where|which|who|is|are|does|do|did|how)\b/i.test(p)) return true;
+  // a short request that names a time, an app or a Mac thing: the picker decides (it answers "none" in about a
+  // second); verb lists alone kept missing wordings ("Jot down a note: …", "Give me an alert saying …")
+  if (p.split(/\s+/).length <= 15 && !/^(who|what is|what are|why|explain|define|translate|summari[sz]e|tell me about|write (a|an) (poem|story|essay))\b/i.test(p)
+    && (/\b(in \d+ (min|minutes|hours?|seconds?)|at \d{1,2}(:\d\d)?\s?(am|pm)?|tomorrow|tonight|this (morning|afternoon|evening|week)|today)\b/i.test(p) || findApp(p.split(/\s+/).find((w) => /^[A-Z]/.test(w)) ?? "") || /\b(note|reminder|alert|notification|e-?mail|clipboard|music|song|track|usb|drive|disk|spreadsheets?|images?|photos?|pdfs?)\b/i.test(p))) return true;
+  return /^(open|launch|start|run|show|jot|note down|give me an? (alert|notification|reminder)|find|bring up|pull up|pop open|go to|get|take me|turn|switch|set|make|enable|disable|mute|unmute|silence|lock|empty|clear|wipe|quit|close|kill|shut|disconnect|connect|increase|decrease|raise|lower|dim|brighten|toggle|put|change|activate|deactivate|fire up|reveal|hide|go|let me see|say|speak|read|copy|remind|play|pause|resume|skip|eject|create|keep|notify|new|count|sleep|start|ping|alert|wake|draft|compose|write an? (e-?mail|note|reminder)|send an? e-?mail|list)\b|^i (need|want) to (see|open|get|turn|change|check)/i.test(p)
+    || /(말해\s?줘|읽어\s?줘|복사해\s?줘|알려\s?줘\s?(\d|오후|오전)|알림\s?(띄워|줘)|만들어\s?줘|재생해|멈춰|다음\s?곡|이전\s?곡|꺼내\s?줘|맞춰\s?줘|깨어\s?있게|잠자기\s?(막아|방지))/.test(p)
+    || /(열어|켜|꺼|끄|띄워|보여|실행해|바꿔|올려|내려|줄여|키워|잠가|비워|종료해|닫아)\s?(줘|주세요|줄래|봐)?$/.test(p);
+}
+
+export const MAC_ACTIONS = ["open_settings_pane", "launch_app", "quit_app", "open_folder", "dark_mode", "light_mode", "mute", "unmute", "volume_up", "volume_down", "set_volume",
+  "brightness_up", "brightness_down", "lock_screen", "screenshot", "wifi_on", "wifi_off", "bluetooth_on", "bluetooth_off", "empty_trash", "show_hidden_files", "hide_hidden_files", "none"] as const;
+/** AFM picks the action and its target; code writes the canonical request the rules understand. */
+async function pickMacAction(afm: AFMProvider, prompt: string, timeoutMs: number): Promise<{ action: string; target: string; canonical: string } | { recipe: string } | undefined> {
+  const r = await afm.generate({
+    system: [
+      "Map the user's request to exactly one entry, or none. Pick an entry only if it does exactly what is asked; a near action is wrong (skipping a song is not quitting Music; putting the display to sleep is not locking the screen; creating a note is not opening Notes).",
+      "Fixed actions: open_settings_pane (a System Settings pane; target: the pane). launch_app (open or start an app; target: the app). quit_app (quit, close or kill an app; target: the app). open_folder (show a folder in Finder; target: the folder).",
+      "dark_mode / light_mode (system appearance, not brightness). brightness_up / brightness_down. mute / unmute / volume_up / volume_down / set_volume (target: the percent). lock_screen. screenshot. wifi_on / wifi_off. bluetooth_on / bluetooth_off. empty_trash. show_hidden_files / hide_hidden_files.",
+      `Recipes:\n${RECIPES.map((x) => `- ${x.id}: ${x.desc}`).join("\n")}`,
+      "target: only for fixed actions, in English; empty otherwise. Do not invent a target. A question about sizes, counts, uptime, memory or the frontmost app is none unless an entry answers exactly that.",
+    ].join("\n"),
+    user: prompt, maxTokens: 80, timeoutMs,
+    schema: { type: "object", properties: { action: { type: "string", enum: [...MAC_ACTIONS.filter((x) => x !== "none"), ...RECIPES.map((x) => x.id), "none"] }, target: { type: "string" } }, required: ["action", "target"], additionalProperties: false } as any,
+  });
+  const j = r.ok ? (r.json as { action: string; target: string }) : undefined;
+  if (!j || j.action === "none") return undefined;
+  if (RECIPES.some((x) => x.id === j.action)) return { recipe: j.action };
+  let t = String(j.target ?? "").trim().replace(/["`]/g, "").slice(0, 40);
+  // code checks on the pick: appearance vs brightness ("Darken the screen" → light_mode), and a pane named in the
+  // request when the pick says only "System Settings" ("Display settings, please")
+  const p = prompt.toLowerCase();
+  if ((j.action === "dark_mode" || j.action === "light_mode") && /(screen|display|brightness|darken|brighten|\bdim)/.test(p) && !/(mode|appearance|theme)/.test(p)) j.action = /(darken|darker|\bdim|dimmer|lower|down)/.test(p) ? "brightness_down" : "brightness_up";
+  if (j.action === "open_settings_pane" && /^(system )?(settings|preferences)$/i.test(t)) { const pane = settingsPaneIntent(`open ${prompt}`)?.pane; t = pane ? pane.en : ""; if (!t) j.action = "launch_app", t = "System Settings"; }
+  // an app that is not installed under the target name is not a launch ("Set a 25 minute focus timer" → "Focus Timer")
+  if ((j.action === "launch_app" || j.action === "quit_app") && t && !findApp(t) && !new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(prompt)) return undefined;
+  const needs = ["open_settings_pane", "launch_app", "quit_app", "open_folder", "set_volume"];
+  if (needs.includes(j.action) && !t) return undefined;
+  const canonical: Record<string, string> = {
+    open_settings_pane: `open ${t} settings`, launch_app: `launch ${t}`, quit_app: `quit ${t}`, open_folder: /^[~/]/.test(t) ? `open ${t}` : `open my ${t} folder`,
+    dark_mode: "turn on dark mode", light_mode: "switch to light mode", mute: "mute", unmute: "unmute", volume_up: "turn the volume up", volume_down: "turn the volume down",
+    set_volume: `set volume to ${t.replace(/\D/g, "")}`, brightness_up: "increase brightness", brightness_down: "decrease brightness", lock_screen: "lock my screen",
+    screenshot: "take a screenshot", wifi_on: "turn on wi-fi", wifi_off: "turn off wi-fi", bluetooth_on: "turn on bluetooth", bluetooth_off: "turn off bluetooth",
+    empty_trash: "empty the trash", show_hidden_files: "show hidden files", hide_hidden_files: "hide hidden files",
+  };
+  return canonical[j.action] ? { action: j.action, target: t, canonical: canonical[j.action] } : undefined;
+}
+/** A question about this Mac's own state that a read-only command answers ("How big is my Downloads folder?"). */
+export function macQuestion(prompt: string): boolean {
+  const p = plainRequest(questionPart(prompt));
+  return p.length <= 120 && /(what (model|kind of mac|type of mac) is (this|my) (mac|computer|laptop)|what (kind|type) of mac|which mac (is this|do i have)|model of (this|my) mac|how many (pdfs?|files?|documents?|images?|photos?|apps?)|what('?s| is) my (mac'?s? )?(serial|ip|battery|macos|wi-?fi|model)|serial number|which (wi-?fi|network)|battery (percent(age)?|level|charge)|apps? (do )?i have (open|running)|(open|running) apps|how (big|large|long|much (space|memory|ram|storage))|which apps?|what apps?|what app|frontmost|in front|uptime|been (on|running|up)|what('?s| is) (playing|this song)|which song|now playing|지금 (나오는|재생 중인)|얼마나 (커|큰|오래)|어떤 앱|용량이 얼마)/i.test(p)
+    && /(mac|computer|folder|downloads|desktop|documents|apps?|memory|ram|disk|space|storage|running|playing|song|music|front|폴더|맥|앱|메모리|용량|노래|음악)/i.test(p);
+}
+export const ACTION_UNSUPPORTED = "The request asks for an action on this Mac that OnBud cannot do directly. Say so in the first sentence (\"I can't do that directly yet\"), then give the shortest steps for the user to do it. Never claim it was done.";
+
 /** The answer prompt for a general question (no files): the request itself is the task. */
 export const GENERAL_SYSTEM = [
   "You are a helpful assistant running on the user's Mac. Answer the request directly from general knowledge.",
@@ -424,7 +495,7 @@ export function typedCommand(prompt: string): string | undefined {
   const head = /^([A-Za-z0-9_.~/-]+)(\s|$)/.exec(t)?.[1];
   if (!head || /^(open|say|yes|no|true|false|test|time|which|find|help|hi|hello|ok|okay|write|tell|explain|translate|summarize|summarise|describe|draft|compose|list|show|give)$/i.test(head)) return undefined;
   // an English sentence, not a command line ("Write a short polite email…", "Look up the weather")
-  if (/^[A-Z][a-z]+\s/.test(t) && /\s(a|an|the|to|for|about|of|into)\s/i.test(` ${t} `)) return undefined;
+  if (/^[A-Z][a-z]+\s/.test(t) && /\s(a|an|the|to|for|about|of|into|it|my|me|this|that)\s/i.test(` ${t} `)) return undefined;
   const found = head.includes("/") ? existsSync(head.replace(/^~(?=\/)/, homedir())) : CMD_DIRS.some((d) => existsSync(join(d, head)));
   return found ? t : undefined;
 }
@@ -620,7 +691,7 @@ export class Controller {
     if (root) for (const p of named) if (!p.isDir && !files.some((f) => resolve(root!, f.path) === p.abs)) files.push({ path: relative(root, p.abs) });
     // No project folder: a conversion of files named by absolute or ~/ paths still runs (and only that skill).
     if (!root) { const hf = homeFiles(prompt); if (hf.length && detectLocalSkill(prompt, hf) === "convert") files = hf; }
-    if (root && !files.length && /(문서|파일|논문|편지|서신|슬라이드|발표|보고서|원고|증명서|엑셀|시트|스프레드시트|목록|명단|파워포인트|프레젠테이션|document|file|paper|letter|slides|report|pdf|excel|sheet|spreadsheet|xlsx|csv|pptx?|presentation|deck)/i.test(prompt)) files = namedDocuments(prompt, root);
+    if (root && !files.length && /(문서|파일|논문|편지|서신|슬라이드|발표|보고서|원고|증명서|엑셀|시트|스프레드시트|목록|명단|파워포인트|프레젠테이션|\b(documents?|files?|papers?|letters?|slides?|reports?|pdfs?|excel|sheets?|spreadsheets?|xlsx|csv|pptx?|presentations?|decks?)\b)/i.test(prompt)) files = namedDocuments(prompt, root);   // words, not parts ("wallpaper" is not "paper")
     const spans = [...prompt.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
     const dangerous = spans.find((s) => gateCommand(s, root ?? homedir()).verdict === "deny");
     const health = await afm.health();
@@ -638,14 +709,14 @@ export class Controller {
     const noJob = () => finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "read_only_job",
       answer: "This needs a multi-step change (a local job), which a delegated AFM task does not run. Do it with your own tools." });
     // the skill run, shared by a rule match here and a router pick before the generic path (P3)
-    const runSkill = async (ls: LocalSkill, routed = false): Promise<Outcome | undefined> => {
+    const runSkill = async (ls: LocalSkill, routed: boolean | string = false, asked = prompt): Promise<Outcome | undefined> => {
       const before = { taskType, reasonCode, skill };
       taskType = ls === "docstrings" ? "small_edit" : "other";
       reasonCode = `local_${ls}`;
       skill = ls;
-      steps.push({ kind: "skill", detail: routed ? `${ls} (router)` : ls });   // shown live by the launcher before the skill runs
+      steps.push({ kind: "skill", detail: routed ? `${ls} (${typeof routed === "string" ? routed : "router"})` : ls });   // shown live by the launcher before the skill runs
       const ts = Date.now();
-      const r = await runLocalSkill(ls, { afm, root: root ?? "", prompt, files, ko, history: task.history, decima: this.decimaClient, timeoutMs: this.budget.afmTimeoutMs });
+      const r = await runLocalSkill(ls, { afm, root: root ?? "", prompt: asked, files, ko, history: task.history, decima: this.decimaClient, timeoutMs: this.budget.afmTimeoutMs });
       steps.push({ kind: `skill_${ls}`, detail: r.detail, ms: Date.now() - ts });
       // Declined (e.g. no word of the request is in the sheet): not this skill after all, route as usual.
       if (r.declined) ({ taskType, reasonCode, skill } = before);
@@ -665,7 +736,7 @@ export class Controller {
     if (ls && !enabled(skillOf(ls))) return disabled(skillOf(ls));
     if (ls) { const out = await runSkill(ls); if (out) return out; }
 
-    let general = false;
+    let general = false, actionUnsupported = false;
     // 1a'. A general question asked from a personal folder (Spotlight's default is ~/Desktop): answered as chat,
     // without reading that folder. Before: "Who wrote Pride and Prejudice?" was answered from an unrelated PDF
     // (Moby-Dick), "When is the Codex token reset?" from an unrelated letter (everyday probe, 2026-11-09).
@@ -990,6 +1061,37 @@ export class Controller {
     // Only for requests that name no file (a named file goes to the document path, which answers questions about
     // it; framework-eval C4/X7: the router turned "how many lines does data.csv have" into a CSV→JSON write).
     // Skills that write files are never started by the router, only by their rules.
+    // 1f. An action on this Mac that no rule caught ("Could you dim the screen a bit?", "Skip this song"), or a
+    // question about this Mac's state ("How big is my Downloads folder?"). One AFM pick over the fixed actions and
+    // the vetted recipes (mac-recipes.ts); it never acts itself. A fixed action becomes the canonical request for its
+    // skill; a recipe gets its slots filled and checked; "none" goes to a command the on-device model writes
+    // (compiled, gated, shown; approval unless read-only). Runs before the router, which misread action requests
+    // ("Start an email to …" → release notes). English probes 2026-11-13: 17 of 45 action requests answered with
+    // text before; free-form AFM commands alone were right 5 of 20 times, which is why recipes come first.
+    if (health.ok && !dangerous && !files.length && (isActionRequest(prompt) || macQuestion(prompt))) {
+      const ts = Date.now();
+      const pick = await pickMacAction(afm, prompt, this.budget.afmTimeoutMs);
+      steps.push({ kind: "action_pick", detail: !pick ? "none" : "recipe" in pick ? `recipe ${pick.recipe}` : `${pick.action}${pick.target ? `: ${pick.target}` : ""} → "${pick.canonical}"`, ms: Date.now() - ts });
+      if (pick && "canonical" in pick) {
+        const id = detectLocalSkill(pick.canonical, []);
+        if (id && (root || NO_ROOT.has(id)) && !(task.readOnly && NOT_DELEGATED.has(id)) && routedSkillApplies(id, pick.canonical, []) && enabled(skillOf(id))) {
+          const out = await runSkill(id, "action", pick.canonical);
+          if (out) return out;
+        }
+      }
+      if (!task.readOnly) {
+        const t2 = Date.now();
+        const la = await localAction(afm, prompt, ko, this.budget.afmTimeoutMs, undefined, pick && "recipe" in pick ? { recipe: pick.recipe } : { plannedOnly: true });
+        steps.push({ kind: "local_action", detail: la ? la.detail : "none", ms: Date.now() - t2 });
+        if (la) {
+          reasonCode = "local_mac_action"; skill = "mac_action";
+          if (la.pendingCommand) return finish({ status: "ask_user", outcomeClass: "asked_user", answer: la.answer, pendingCommand: la.pendingCommand });
+          return finish({ status: "answered_local", outcomeClass: la.verified ? "local_verified" : "local_unverified", answer: la.answer });
+        }
+      }
+      if (pick && isActionRequest(prompt)) actionUnsupported = true;
+    }
+
     if (!dangerous && health.ok && routerMode() !== "off" && !files.length) {
       const pick = await pickSkill(afm, prompt, entriesOf(), this.budget.afmTimeoutMs);
       const id = pick.id as LocalSkill | undefined;
@@ -1036,7 +1138,8 @@ export class Controller {
     if (route === "LOCAL_AFM" && selfEscalate && root && files.length === 0) { route = "FRONTIER_GPT"; reasonCode = "afm_triage_escalate"; }
     if (route === "FRONTIER_CLAUDE") route = "FRONTIER_GPT";   // only the ChatGPT/Codex provider is configured
     steps.push({ kind: "route", detail: `${route}:${reasonCode}` });
-    const sys = general ? { text: `${GENERAL_SYSTEM}\nReply in ${ko ? "Korean" : "English"}.`, skill: "general-chat" } : systemFor(this.policy, taskType);
+    const sys = general ? { text: `${GENERAL_SYSTEM}\nReply in ${ko ? "Korean" : "English"}.${actionUnsupported ? `\n${ACTION_UNSUPPORTED}` : ""}`, skill: "general-chat" } : systemFor(this.policy, taskType);
+    if (actionUnsupported && !general) sys.text += `\n\n${ACTION_UNSUPPORTED}`;
     skill = sys.skill;
     this.tel.decision({ taskId, provider: d.provider, candidates, action: route, reasonCode, afmAvailable: health.ok, rawScores: d.rawScores,
       riskSignals: [dangerous ? "destructive_command" : "", secrets.length ? "secrets_redacted" : ""].filter(Boolean) });
