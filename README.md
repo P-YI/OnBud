@@ -46,6 +46,28 @@ nothing leaves it unless you turn on a plugin that says so.
 > Inc. It uses Apple's public FoundationModels framework through [apfel](https://github.com/Arthur-Ficial/apfel),
 > like any third-party app. Apple, Apple Intelligence, macOS and Spotlight are trademarks of Apple Inc.
 
+## Recent updates
+
+| Version | What's new |
+|---|---|
+| [0.2.5](docs/release-notes-0.2.5.md) | Choice buttons instead of guesses · image size targets · PDF merges with page picks · absolute-path answers |
+| [0.2.4](docs/release-notes-0.2.4.md) | Mac actions in plain English are carried out · volume, brightness, Wi-Fi, Bluetooth, Trash and more · vetted recipes |
+| [0.2.3](docs/release-notes-0.2.3.md) | A path in the request sets the work folder · LaTeX compiles the named file · translation fixes |
+
+<details>
+<summary>Earlier releases</summary>
+
+| Version | What's new |
+|---|---|
+| [0.2.2](docs/release-notes-0.2.2.md) | System Settings panes · Codex usage · quick answers by code · general questions as chat |
+| [0.2.1](docs/release-notes-0.2.1.md) | Architecture diagram in the README |
+| [0.2.0](docs/release-notes-0.2.0.md) | New name OnBud · Copilot → Codex code ladder · 13 skill packs and the Skills window · remote servers |
+| [0.1.0](docs/release-notes-0.1.0.md) | First release (as OpenAFM): launcher, documents with OCR, approvals, plugins |
+
+</details>
+
+Every release in a few lines: [CHANGELOG.md](CHANGELOG.md).
+
 ## Requirements
 
 - Apple silicon Mac (M1 or later), **macOS 26 Tahoe or later**
@@ -54,7 +76,8 @@ nothing leaves it unless you turn on a plugin that says so.
 - **No Xcode.** Apple's Command Line Tools (git, python3, swiftc) are enough; Homebrew installs them with
   itself. OnBud uses `swiftc` only to build its small helpers on first use if they are missing.
 
-Optional, for single features (install them when you want the feature):
+<details>
+<summary>Optional, for single features (install them when you want the feature)</summary>
 
 | Feature | Needs |
 |---|---|
@@ -63,6 +86,8 @@ Optional, for single features (install them when you want the feature):
 | Faster code search | [`ripgrep`](https://github.com/BurntSushi/ripgrep) (`brew install ripgrep`; else `git grep`) |
 | Router model, Codex, web search, LaTeX, translation | the matching plugin in Settings > Plugins (see [Plugins](#plugins)) |
 | Code written by GitHub Copilot | a Copilot plan and Backend > GitHub Copilot (see [GitHub Copilot](#github-copilot-optional)) |
+
+</details>
 
 ## Install
 
@@ -115,6 +140,12 @@ Everything OnBud does belongs to one of 13 skill packs (`skills/<id>/skill.json`
 may do and what may leave the Mac; a skill eval checks every change against those contracts. Menu bar ›
 **Skills…** shows each one with its permissions, the plugins it uses and its switch.
 
+**core** · **files** · **code** · **git** · **writing** · **mac** · **security** · **web** · **frontier** ·
+**server** · **convert** · **shortcuts** · **personal** (off by default)
+
+<details>
+<summary>What each skill does, what it may do and what leaves the Mac</summary>
+
 | Skill | What it does | May | Leaves the Mac | Uses |
 |---|---|---|---|---|
 | core | triage, routing, the final answer and its citation checks, memory, the escalation decision | read, propose | nothing | Router model (optional) |
@@ -130,6 +161,8 @@ may do and what may leave the Mac; a skill eval checks every change against thos
 | convert | images (format, size targets such as "under 5MB"), PDF merges in any order with pages picked or left out, page edits, documents, zip — always into new files, every PDF page checked | read, write new files | nothing | macOS (sips, PDFKit, textutil) |
 | shortcuts | list your Shortcuts, run one after approval, install from a vetted catalog | read, propose, run after approval | nothing | Shortcuts |
 | personal | Calendar events and Reminders, read-only — **off by default** | read | nothing (never stored, logged or handed off) | macOS Calendars / Reminders access |
+
+</details>
 
 When a request could mean several things (two files with the same name, several LaTeX documents, similar
 Shortcuts), OnBud offers the choices as buttons (⌘1…⌘9) instead of guessing.
@@ -156,6 +189,9 @@ click **Start** in Backend (starting at login is an option).
 | Remote server | run experiments on your server; watch it in a terminal IDE | your `ssh`; [Fresh](https://github.com/sinelaw/fresh) (GPL-3.0) on the Mac or [TTT](https://github.com/eugenioenko/ttt) (MIT) on the server, installed separately |
 
 ### Remote servers and terminal IDEs (optional)
+
+<details>
+<summary>How the server skill works: upload, run after your yes, watch in Fresh or TTT</summary>
 
 When you develop on a GPU server, an IDE running there (VS Code Remote, say) has no OpenCode, so the cost-saving
 ladder (Copilot → Codex's cheap tier → its strong tier) is lost. The `server` skill keeps OnBud on the Mac and
@@ -184,7 +220,14 @@ Mac terminal (Ghostty, iTerm, Terminal): fresh ssh://host/dir   or   ssh -t host
 - Fresh (GPL-3.0) and TTT (MIT) are optional third-party programs, installed separately under their own licenses.
   OnBud does not bundle or redistribute their source or binaries; it only starts them as external programs.
 
+</details>
+
 ### GitHub Copilot (optional)
+
+Only Copilot's inline code completion, through GitHub's official language server (MIT), under your own account.
+
+<details>
+<summary>Plans, terms, pacing and what leaves the Mac</summary>
 
 - **What is used:** only Copilot's *inline code completion*, through GitHub's official
   [`@github/copilot-language-server`](https://www.npmjs.com/package/@github/copilot-language-server) (MIT),
@@ -202,6 +245,8 @@ Mac terminal (Ghostty, iTerm, Terminal): fresh ssh://host/dir   or   ssh -t host
 - **What leaves the Mac:** the code being completed (the request's function and its context) goes to GitHub.
   The `code` skill is marked accordingly. Turn Copilot off in Backend > GitHub Copilot or with
   `ONBUD_COPILOT=off`; code then goes on-device first, then to Codex if allowed.
+
+</details>
 
 ## How it works
 
@@ -250,7 +295,7 @@ setup: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Every benchmark setup and result, with the comparison to small open models |
 | [tools/bench/BENCHMARK.md](tools/bench/BENCHMARK.md) | How to run the benchmarks yourself |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building, testing, where things live, rollback |
-| [docs/release-notes-0.2.5.md](docs/release-notes-0.2.5.md) | What changed in 0.2.5 · [0.2.4](docs/release-notes-0.2.4.md) · [0.2.3](docs/release-notes-0.2.3.md) · [0.2.2](docs/release-notes-0.2.2.md) · [0.2.1](docs/release-notes-0.2.1.md) · [0.2.0](docs/release-notes-0.2.0.md) (and how to upgrade from 0.1.0) · [0.1.0](docs/release-notes-0.1.0.md) |
+| [CHANGELOG.md](CHANGELOG.md) | Every release in a few lines, linking to its full notes (`docs/release-notes-<version>.md`; 0.2.0 also explains the upgrade from 0.1.0) |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licenses of the projects, models and datasets OnBud uses or learned from |
 
 ## Apple Foundation Models, `fm` and licensing
