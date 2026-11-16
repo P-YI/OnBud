@@ -26,7 +26,7 @@ test("convert: the plan comes from the request; new files only, originals unchan
   const before = statSync(join(dir, "a.pdf")).mtimeMs;
   const r = await convert({ root: dir, prompt: "a.pdf와 b.pdf를 합쳐줘", files: [{ path: "a.pdf" }, { path: "b.pdf" }], ko: true });
   assert.equal(r.verified, true, r.answer);
-  assert.match(r.detail, /merge_pdf: 1 file\(s\), 2\/2 pages/);
+  assert.match(r.detail, /merge_pdf: a\.pdf\[1\] \+ b\.pdf\[1\], 2\/2 pages/);
   assert.ok(existsSync(join(dir, "a (merged).pdf")));
   assert.equal(statSync(join(dir, "a.pdf")).mtimeMs, before);
   // image: pdf page → png via sips, then resized
@@ -101,4 +101,29 @@ test("P6 rules and delegation: detected by rules; none of them run for a delegat
   assert.equal(detectLocalSkill('클립보드 내용 보여줘', []), "mac_control");
   assert.equal(detectLocalSkill('Why does this fail?\n\nText (clipboard):\n"""\nTraceback (most recent call last):\n  File "a.py", line 3, in <module>\nKeyError: 1\n"""', []), "error_triage");
   for (const s of ["convert", "shortcuts", "mac_control", "browser_tab", "personal"] as const) assert.ok(NOT_DELEGATED.has(s), s);
+});
+
+test("compression: a size target (Finder MB), compress + format, 압축 for images, follow-up file", async () => {
+  const { sizeTarget, convertPlan, followUpFile } = await import("../services/controller/mac-tasks.ts");
+  assert.equal(sizeTarget("Compress the file under 5MB"), 5_000_000);
+  assert.equal(sizeTarget("800 KB 이하로"), 800_000);
+  assert.equal(sizeTarget("2메가 미만"), 2_000_000);
+  assert.equal(sizeTarget("resize to 800 px"), undefined);
+  const img = ["/x/IMG_1.HEIC"];
+  assert.deepEqual(convertPlan("Compress the file under 5MB, but jpg format.", img), { op: "shrink", fmt: "jpg", maxBytes: 5_000_000, px: undefined, pct: undefined });
+  assert.equal(convertPlan("Compress the file under 5MB.", img)?.op, "shrink");
+  assert.equal(convertPlan("이미지 압축해줘", img)?.op, "shrink");
+  assert.equal(convertPlan("zip으로 압축해줘", img)?.op, "zip");
+  assert.equal(convertPlan("convert to jpg", img)?.op, "image");
+  // follow-up: the last created file from this input, unless the original is named
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const d = mkdtempSync(join(tmpdir(), "onbud-conv-"));
+  const orig = join(d, "IMG_6729.HEIC"), made = join(d, "IMG_6729 (converted).jpg");
+  writeFileSync(orig, "x"); writeFileSync(made, "y");
+  const h = `assistant: Created (the originals are unchanged):\n\n- \`${made}\``;
+  assert.equal(followUpFile("Compress the file under 5MB.\n\nFiles: IMG_6729.HEIC", [orig], h), made);
+  assert.equal(followUpFile("Compress IMG_6729 under 5MB\n\nFiles: IMG_6729.HEIC", [orig], h), undefined);
+  assert.equal(followUpFile("Compress the file", [orig], undefined), undefined);
 });

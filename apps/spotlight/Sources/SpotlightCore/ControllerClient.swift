@@ -19,8 +19,9 @@ public enum StreamEvent: Sendable, Equatable {
     case text(String)
     /** A controller step while the request runs (launcher only): kind (route, seed, tool, answer…) and detail. */
     case step(String, String)
-    /** Final chunk: what the controller now waits for (command, edit, apply, handoff, web, job, reveal) or nil. */
-    case done(awaiting: String?)
+    /** Final chunk: what the controller now waits for (command, edit, apply, handoff, web, job, reveal, choice) or
+     *  nil, and for "choice" the options' labels (sent back as the reply when one is picked). */
+    case done(awaiting: String?, choices: [String] = [])
 }
 
 public enum ClientError: Error, LocalizedError, Equatable {
@@ -44,7 +45,7 @@ public func parseSSELine(_ line: String) -> StreamEvent? {
           let choice = (obj["choices"] as? [[String: Any]])?.first else { return nil }
     if let finish = choice["finish_reason"] as? String, !finish.isEmpty {
         let meta = obj["onbud"] as? [String: Any]
-        return .done(awaiting: meta?["awaiting"] as? String)
+        return .done(awaiting: meta?["awaiting"] as? String, choices: meta?["choices"] as? [String] ?? [])
     }
     if let delta = choice["delta"] as? [String: Any], let text = delta["content"] as? String, !text.isEmpty {
         return .text(text)
@@ -108,7 +109,7 @@ public struct ControllerClient: Sendable {
                         continuation.yield(ev)
                         if case .done = ev { finished = true }
                     }
-                    if !finished { continuation.yield(.done(awaiting: nil)) }
+                    if !finished { continuation.yield(.done(awaiting: nil, choices: [])) }
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
             }
@@ -120,7 +121,7 @@ public struct ControllerClient: Sendable {
     public func send(messages: [ChatMessage], root: String?) async throws -> (text: String, awaiting: String?) {
         var text = "", awaiting: String?
         for try await ev in stream(messages: messages, root: root) {
-            switch ev { case .text(let t): text += t; case .done(let a): awaiting = a; case .step: break }
+            switch ev { case .text(let t): text += t; case .done(let a, _): awaiting = a; case .step: break }
         }
         return (text, awaiting)
     }

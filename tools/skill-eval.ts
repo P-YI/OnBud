@@ -68,6 +68,7 @@ const FIXTURES: Record<string, { build: (dir: string) => void; probe: string; n:
     for (const [n, t] of [["part1.pdf", "Part one."], ["part2.pdf", "Part two."]]) { const f = join(dir, `${n}.txt`); writeFileSync(f, t); writeFileSync(join(dir, n), execFileSync("/usr/sbin/cupsfilter", [f], { stdio: ["ignore", "pipe", "ignore"] })); rmSync(f); }
     execFileSync("/usr/bin/sips", ["-s", "format", "png", join(dir, "part1.pdf"), "--out", join(dir, "cover.png")], { stdio: "ignore" });
     writeFileSync(join(dir, "memo.txt"), "Short memo for conversion.");
+    { const f = join(dir, "long.txt"); writeFileSync(f, "Long page one.\fLong page two.\fLong page three."); writeFileSync(join(dir, "long.pdf"), execFileSync("/usr/sbin/cupsfilter", [f], { stdio: ["ignore", "pipe", "ignore"] })); rmSync(f); }
   } },
   "topic-docs": { probe: ["Velvet", "Lattice"].join(" "), n: 1, build: (dir) => {
     const T = ["Velvet", "Lattice", "Theorem"].join(" ");   // assembled, so this source file does not match it

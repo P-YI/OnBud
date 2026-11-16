@@ -33,7 +33,8 @@ import type { DecimaClient } from "../laya-router/decima.ts";
 import { redact } from "../security/gate.ts";
 import { sha, type EditProposal } from "./edit-loop.ts";
 import { projectFiles } from "./jobs.ts";
-import { browserTab, convert, macControl, personal, shortcutsSkill } from "./mac-tasks.ts";
+import type { Choice } from "./choices.ts";
+import { browserTab, convert, macControl, pdfPageEdit, personal, shortcutsSkill } from "./mac-tasks.ts";
 import { findApp } from "../context-builder/apps.ts";
 import { serverIntent } from "../server/server-skill.ts";
 import { settingsPaneIntent, WIFI_PASSWORD } from "./settings-pane.ts";
@@ -47,7 +48,7 @@ export const NO_ROOT = new Set<LocalSkill>(["quick_answer", "convert", "mac_heal
 export const WRITES_FILES = new Set<LocalSkill>(["csv_json", "convert", "translate", "docstrings"]);
 export const NOT_DELEGATED = new Set<LocalSkill>(["open_app", "launch_app", "copilot", "convert", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
 export interface SkillContext { afm: AFMProvider; root: string; prompt: string; files: { path: string }[]; ko: boolean; history?: string; decima?: DecimaClient; timeoutMs?: number }
-export interface SkillResult { answer: string; verified: boolean; pendingEdit?: { edit: EditProposal; testCmd?: string }; pendingCommand?: string; detail: string; declined?: boolean }   // declined: not this skill after all; the controller goes on
+export interface SkillResult { answer: string; verified: boolean; pendingEdit?: { edit: EditProposal; testCmd?: string }; pendingCommand?: string; detail: string; declined?: boolean; choices?: Choice[] }   // declined: not this skill after all; the controller goes on
 
 const LOG_EXT = /\.(log|txt|out|err)$/i;
 // Repository state questions (not how-to questions, not requests to change anything: those go to help or a job).
@@ -170,6 +171,8 @@ function detectByRules(prompt: string, files: { path: string }[]): LocalSkill | 
   if (has(TEXT_EXT) && /(할\s?일|담당|마감|action items?|to-?dos?|deadlines?|owners?)/i.test(p) && /(표|테이블|table|목록|list|정리|추출|extract)/i.test(p)) return "extract_table";
   // P6: common Mac tasks (mac-tasks.ts); the router catches other wordings
   if (has(/\.(png|jpe?g|heic|heif|tiff?|gif|bmp|webp|pdf|txt|rtf|html?|docx?|odt)$/i) && /(변환|바꿔|convert|resize|크기|줄여|합쳐|합치|병합|merge|combine|압축|zip|compress|\b(turn|make|save|export)\b.{1,40}\b(into|as)\b|(으)?로\s?(만들어|저장))/i.test(p)) return "convert";
+  // PDF pages (pdf-plan.ts): "a.pdf에서 3쪽 빼줘", "insert b.pdf after page 2 of a.pdf", "b.pdf를 a.pdf 3쪽 뒤에 넣어줘"
+  if (has(/\.pdf$/i) && (pdfPageEdit(p) || (files.filter((f) => /\.pdf$/i.test(f.path)).length >= 2 && /(insert|\bput\b|append|attach|이어\s?붙|넣어|끼워|삽입|붙여|join|concatenate|stitch)/i.test(p)))) return "convert";
   if (/(단축어|\bshortcuts?\b)/i.test(p) && !/(단축키|keyboard shortcut)/i.test(p) && /(목록|리스트|\blist\b|실행|돌려|\brun\b|\buse\b|설치|install|받아|다운로드|download|\bget\b|추가|\badd\b|갤러리|gallery|뭐\s?있|what|만들|생성|\b(create|make|new|build)\b)/i.test(p)) return "shortcuts";
   if (/((current|this|open|front)\s+(browser\s+)?(tab|page)|(지금|현재)\s?(보고\s?있는|열린|열어\s?둔)\s?(탭|페이지|웹\s?페이지))/i.test(p)) return "browser_tab";
   // reading the calendar and reminders; adding one is a Mac action (mac-recipes.ts reminder_new)
@@ -222,7 +225,7 @@ const str = (s: unknown) => (typeof s === "string" ? s.trim() : "");
 
 export async function runLocalSkill(skill: LocalSkill, c: SkillContext): Promise<SkillResult> {
   switch (skill) {
-    case "convert": return convert(c);
+    case "convert": return convert({ ...c, history: c.history });
     case "shortcuts": return shortcutsSkill(c);
     case "mac_control": return macControl(c);
     case "browser_tab": return browserTab(c);

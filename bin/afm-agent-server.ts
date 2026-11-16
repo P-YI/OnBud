@@ -21,6 +21,7 @@ import { MemoryStore } from "../services/memory/memory.ts";
 import { contractMode, requestLanguage } from "../services/skills/language.ts";
 import { classifyCommand, execCommand, renderResult } from "../services/context-builder/terminal.ts";
 import { revealInFinder } from "../services/context-builder/finder.ts";
+import { choicesText, matchChoice, type Choice } from "../services/controller/choices.ts";
 import { copilotChat, vscodeCli } from "../services/context-builder/apps.ts";
 import { settle, startSession } from "../services/context-builder/sessions.ts";
 import { applyToProject, diffOf, type EditProposal } from "../services/controller/edit-loop.ts";
@@ -76,8 +77,9 @@ function controllerFor(setting: Setting | undefined, routerModel?: string): Cont
 //   handoff  → Codex (read-only)          command → run it (tmux session if long-running)
 //   edit     → sandbox trial + tests      apply   → write the tested edit to the real file
 //   reveal   → a number reveals that find-files result in Finder
+//   choice   → a number or a label picks one of the options a skill offered (choices.ts)
 interface Pending {
-  kind: "handoff" | "command" | "edit" | "apply" | "reveal" | "web" | "job";
+  kind: "handoff" | "command" | "edit" | "apply" | "reveal" | "web" | "job" | "choice";
   prompt: string; capsule: string; root?: string; reason: string; at: number;
   command?: string; background?: boolean;
   edit?: EditProposal; testCmd?: string;
@@ -86,6 +88,7 @@ interface Pending {
   edits?: boolean;        // the task changes files → "yes" switches agents instead of a read-only answer
   web?: { query: string; kind: "general" | "papers" | "encyclopedia" };
   job?: { id: string; action: "run" | "apply" | "discard" | "review" | "compare" | "review_compare"; ids?: string[] };
+  choices?: Choice[];     // choice → a number or a label runs that option (services/controller/choices.ts)
 }
 // Persisted (mode 600) so a restart — e.g. node --watch after a code edit — does not drop an approval.
 const PENDING_FILE = join(HOME, "runtime", "state", "pending.json");
@@ -266,11 +269,40 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
     : undefined;
   const controller = controllerFor(setting, String(req.headers["x-onbud-router-model"] ?? "") || undefined);
   try {
-    const waiting = pending.get(key);
+    let waiting = pending.get(key);
     let text: string;
     let capsuleTokens = 0;
+    // A reply to offered options: the picked option runs (its exact request, in the folder of the original), or its
+    // ready answer is shown. Anything else is a new request and the options are dropped.
+    let chosen: Choice | undefined, repick: Choice[] | undefined;
+    if (waiting?.kind === "choice") {
+      const live = Date.now() - waiting.at < PENDING_TTL_MS;
+      chosen = live ? matchChoice(prompt, waiting.choices ?? []) : undefined;
+      if (!chosen && live && isYes(prompt)) repick = waiting.choices;   // "yes" picks nothing: ask for the number again
+      else if (!chosen) { pending.delete(key); waiting = undefined; }
+    }
+    const chosenRoot = chosen ? waiting?.root ?? root : root;
+    if (chosen) { pending.delete(key); waiting = undefined; }
+    // the normal path: the controller handles the request, and what it leaves waiting is kept for the next reply
+    const handleFresh = async (ask: string, at: string | undefined) => {
+      const out = await controller.handle({ prompt: ask, root: at, history: history || undefined, frontEnd: "opencode", onStep });
+      const edits = needsEdits(ask, out.reasonCode);
+      const wr = out.workRoot ?? at;   // a path named in the request moved the work there
+      if (out.status === "escalation_required") pending.set(key, { kind: "handoff", prompt: ask, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, at: Date.now(), sessionID, edits });
+      if (out.pendingCommand) pending.set(key, { kind: "command", prompt: ask, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, command: out.pendingCommand, background: out.background, at: Date.now() });
+      if (out.pendingEdit) pending.set(key, { kind: "edit", prompt: ask, capsule: "", root: wr, reason: out.reasonCode, edit: out.pendingEdit.edit, testCmd: out.pendingEdit.testCmd, at: Date.now() });
+      if (out.pendingJob) pending.set(key, { kind: "job", prompt: ask, capsule: "", root: wr, reason: out.reasonCode, job: out.pendingJob, at: Date.now(), sessionID });
+      if (out.pendingWeb) pending.set(key, { kind: "web", prompt: ask, capsule: "", root: at, reason: out.reasonCode, web: out.pendingWeb, at: Date.now() });
+      if (out.revealPaths?.length) pending.set(key, { kind: "reveal", prompt: ask, capsule: "", root: at, reason: out.reasonCode, paths: out.revealPaths, at: Date.now() });
+      if (out.choices?.length) pending.set(key, { kind: "choice", prompt: ask, capsule: "", root: wr, reason: out.reasonCode, choices: out.choices, at: Date.now() });
+      capsuleTokens = out.capsuleTokens ?? 0;
+      return render(out, (Date.now() - t0) / 1000, !at, ko, !!sessionID, edits) + (out.choices?.length ? choicesText(out.choices, ko) : "");
+    };
     const pick = /^\s*(\d{1,2})\s*(번)?\s*(열어.*|open.*)?$/i.exec(prompt);
-    if (waiting?.kind === "reveal" && pick && Date.now() - waiting.at < PENDING_TTL_MS) {
+    if (repick) text = (ko ? "어느 것인지 번호로 골라 주세요." : "Which one? Reply with its number.") + choicesText(repick, ko);
+    else if (chosen?.answer) text = chosen.answer;
+    else if (chosen?.prompt) text = await handleFresh(chosen.prompt, chosenRoot);
+    else if (waiting?.kind === "reveal" && pick && Date.now() - waiting.at < PENDING_TTL_MS) {
       // Reveal one of the paths the finder returned (nothing else can be opened this way).
       const target = waiting.paths?.[Number(pick[1]) - 1];
       const ok = target ? await revealInFinder(target) : false;
@@ -430,21 +462,12 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
       text = ko ? "지금 확인을 기다리는 작업이 없어요 (30분이 지나면 대기 중인 승인도 만료돼요). 하려던 요청을 다시 보내 주세요."
         : "Nothing is waiting for a yes/no right now (pending approvals expire after 30 minutes). Please send the request again.";
     } else {
-      const out = await controller.handle({ prompt, root, history: history || undefined, frontEnd: "opencode", onStep });
-      const edits = needsEdits(prompt, out.reasonCode);
-      const wr = out.workRoot ?? root;   // a path named in the request moved the work there
-      if (out.status === "escalation_required") pending.set(key, { kind: "handoff", prompt, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, at: Date.now(), sessionID, edits });
-      if (out.pendingCommand) pending.set(key, { kind: "command", prompt, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, command: out.pendingCommand, background: out.background, at: Date.now() });
-      if (out.pendingEdit) pending.set(key, { kind: "edit", prompt, capsule: "", root: wr, reason: out.reasonCode, edit: out.pendingEdit.edit, testCmd: out.pendingEdit.testCmd, at: Date.now() });
-      if (out.pendingJob) pending.set(key, { kind: "job", prompt, capsule: "", root: wr, reason: out.reasonCode, job: out.pendingJob, at: Date.now(), sessionID });
-      if (out.pendingWeb) pending.set(key, { kind: "web", prompt, capsule: "", root, reason: out.reasonCode, web: out.pendingWeb, at: Date.now() });
-      if (out.revealPaths?.length) pending.set(key, { kind: "reveal", prompt, capsule: "", root, reason: out.reasonCode, paths: out.revealPaths, at: Date.now() });
-      text = render(out, (Date.now() - t0) / 1000, !root, ko, !!sessionID, edits);
-      capsuleTokens = out.capsuleTokens ?? 0;
+      text = await handleFresh(prompt, root);
     }
     const usage = { prompt_tokens: capsuleTokens, completion_tokens: Math.ceil(text.length / 3), total_tokens: capsuleTokens + Math.ceil(text.length / 3) };
     // Launcher requests also get what is waiting for the user's answer, so it can show yes/no buttons.
-    const extra = setting ? { onbud: { setting, awaiting: pending.get(key)?.kind ?? null } } : {};
+    const w2 = pending.get(key);
+    const extra = setting ? { onbud: { setting, awaiting: w2?.kind ?? null, ...(w2?.kind === "choice" ? { choices: (w2.choices ?? []).map((c) => c.label) } : {}) } } : {};
     if (body.stream) {
       res.write(chunk({ content: text }, null));
       res.write(chunk({}, "stop", { usage, ...extra }));

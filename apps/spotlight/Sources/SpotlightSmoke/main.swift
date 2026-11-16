@@ -19,6 +19,7 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
 
 // MARK: 1. core
 
+check("SSE: choices", parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"onbud":{"setting":"s2","awaiting":"choice","choices":["a.pdf의 2쪽","b.pdf의 2쪽"]}}"#) == .done(awaiting: "choice", choices: ["a.pdf의 2쪽", "b.pdf의 2쪽"]))
 check("SSE: content delta", parseSSELine(#"data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#) == .text("hi"))
 check("SSE: keep-alive ignored", parseSSELine(": working") == nil)
 check("SSE: [DONE] ignored", parseSSELine("data: [DONE]") == nil)

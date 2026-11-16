@@ -23,7 +23,8 @@ import { applyJob, compareJobs, discardJob, journalPath, jobDiffs, jobIdFrom, li
 import { algorithmic, newCodeRequest } from "./codegen.ts";
 import { frontierReachable } from "./frontier-opencode.ts";
 import { helpLanguage, helpTopic, isHelpRequest, renderHelp, unknownGitCommand } from "./help.ts";
-import { gateCommand, redact } from "../security/gate.ts";
+import { gateCommand, gatePath, redact } from "../security/gate.ts";
+import type { Choice } from "./choices.ts";
 import { loadPolicy, systemFor, type Policy } from "../policy/policy.ts";
 import { NullTelemetry, projectHash, type OutcomeClass, type TelemetrySink } from "../telemetry/telemetry.ts";
 import { MemoryStore, renderMemory } from "../memory/memory.ts";
@@ -36,7 +37,7 @@ import { loadRegistry } from "../skills/registry.ts";
 let packOf: Map<string, string> | undefined;
 const skillOf = (ls: string) => (packOf ??= new Map(loadRegistry().skills.flatMap((s) => Object.keys(s.entries ?? {}).map((e) => [e, s.id] as [string, string])))).get(ls) ?? "core";
 import { buildInventory, hasHangul, isInventoryRequest, renderInventory } from "./inventory.ts";
-import { findByName, findFiles, findFrame, isFindRequest, kindFromPrompt, nameTerms, renderFound, type FindFrame } from "../context-builder/finder.ts";
+import { findByName, findFiles, findFrame, isFindRequest, kindFromPrompt, nameTerms, pathAsk, renderFound, type FindFrame } from "../context-builder/finder.ts";
 import { checkReferences, compileLatex, csvToLatexTable, findMainTex, mainTexFiles, namedTexPath, fixUndefinedMacro, hasTeX, maskLatex, unmaskLatex, isLatexProject, renderLatexReport, trialCompileCommand } from "../context-builder/latex.ts";
 import { fetchPage, isWebRequest, kindFor, webSearch, type WebKind } from "../context-builder/websearch.ts";
 import { isLongRunning, listSessions, readSession, renderSessions, stopSession } from "../context-builder/sessions.ts";
@@ -97,6 +98,7 @@ export interface Outcome {
   revealPaths?: string[];     // find-files results the user can reveal in Finder by number
   pendingWeb?: { query: string; kind: WebKind };   // web search waiting for the user's OK (the query leaves the Mac)
   pendingJob?: { id: string; action: "run" | "apply" | "discard" | "review" | "compare"; ids?: string[] };   // local job waiting for the user
+  choices?: Choice[];         // options for the user to pick (choices.ts); the agent server lists them and keeps them
 }
 
 /** Jobs (branch + worktree) only for code or LaTeX work: the project has such files, or the request names one. */
@@ -223,10 +225,32 @@ export function homeFiles(prompt: string): { path: string }[] {
   return out.map((path) => ({ path }));
 }
 
+/** Files named exactly `name` under `root` (relative paths): bounded walk, no hidden folders or dependency trees. */
+export function findBasename(root: string, name: string, maxDepth = 5, maxEntries = 40_000): string[] {
+  const want = name.normalize("NFC").toLowerCase(), out: string[] = [];
+  let seen = 0;
+  const visit = (rel: string, depth: number) => {
+    let entries: import("node:fs").Dirent[];
+    try { entries = readdirSync(resolve(root, rel), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (++seen > maxEntries || out.length > 5) return;
+      if (e.name.startsWith(".") || /^(node_modules|__pycache__|venv|Library|site-packages)$/.test(e.name)) continue;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { if (depth < maxDepth) visit(r, depth + 1); }
+      else if (e.name.normalize("NFC").toLowerCase() === want && gatePath(e.name, resolve(root, rel), "read").verdict !== "deny") out.push(r);
+    }
+  };
+  visit("", 0);
+  return out;
+}
+
 export function mentionedFiles(prompt: string, root: string): { path: string; line?: number }[] {
   const out = new Map<string, number | undefined>();
   for (const m of prompt.matchAll(FILE_REF)) {
     if (existsSync(resolve(root, m[1]))) out.set(m[1], m[2] ? Number(m[2]) : undefined);
+    // a bare file name that is not in the open folder itself but in exactly one of its subfolders
+    // ("STATUS_REPORT.md 요약해줘" with the file in ~/Downloads/Projects/demo; 2026-11-16): that file
+    else if (!m[1].includes("/") && root) { const hit = findBasename(root, m[1]); if (hit.length === 1) out.set(hit[0], m[2] ? Number(m[2]) : undefined); }
   }
   for (const p of spacedPaths(prompt, root)) if (![...out.keys()].some((k) => resolve(root, k) === resolve(root, p))) out.set(p, undefined);
   // A name written without its extension that is exactly a top-level file's name ("the README" → README.md): only
@@ -269,7 +293,7 @@ const NAME_STOP = new Set(["the", "and", "for", "final", "accepted", "camera", "
 
 /** Documents named loosely ("Award Letter 문서" → "Workshop Award Letter.pdf"): file-name words found in
  *  the request. Returns the single best match, or nothing when two files match equally well. */
-export function namedDocuments(prompt: string, root: string): { path: string }[] {
+export function namedDocuments(prompt: string, root: string, ties?: string[]): { path: string }[] {
   const p = prompt.toLowerCase().normalize("NFC");
   const pre = p.split(/[^\p{L}\p{N}]+/u).flatMap((w) => /[\uac00-\ud7a3]/.test(w) ? [...w].map((_, k) => [...w].slice(0, k + 1).join("")).filter((x) => [...x].length >= 3) : [...w].length >= 5 ? [w] : []);
   const scored: { path: string; score: number }[] = [];
@@ -296,7 +320,11 @@ export function namedDocuments(prompt: string, root: string): { path: string }[]
   };
   visit("", 0);
   scored.sort((a, b) => b.score - a.score);
-  if (!scored.length || (scored[1] && scored[1].score === scored[0].score)) return [];
+  if (!scored.length || (scored[1] && scored[1].score === scored[0].score)) {
+    // equally good matches: kept for the user to pick (choices) when the match is strong (two words or more)
+    if (ties && scored.length && scored[0].score >= 2) ties.push(...scored.filter((x) => x.score === scored[0].score).slice(0, 5).map((x) => x.path));
+    return [];
+  }
   return [{ path: scored[0].path }];
 }
 
@@ -691,7 +719,29 @@ export class Controller {
     if (root) for (const p of named) if (!p.isDir && !files.some((f) => resolve(root!, f.path) === p.abs)) files.push({ path: relative(root, p.abs) });
     // No project folder: a conversion of files named by absolute or ~/ paths still runs (and only that skill).
     if (!root) { const hf = homeFiles(prompt); if (hf.length && detectLocalSkill(prompt, hf) === "convert") files = hf; }
-    if (root && !files.length && /(문서|파일|논문|편지|서신|슬라이드|발표|보고서|원고|증명서|엑셀|시트|스프레드시트|목록|명단|파워포인트|프레젠테이션|\b(documents?|files?|papers?|letters?|slides?|reports?|pdfs?|excel|sheets?|spreadsheets?|xlsx|csv|pptx?|presentations?|decks?)\b)/i.test(prompt)) files = namedDocuments(prompt, root);   // words, not parts ("wallpaper" is not "paper")
+    const docTies: string[] = [];
+    if (root && !files.length && /(문서|파일|논문|편지|서신|슬라이드|발표|보고서|원고|증명서|엑셀|시트|스프레드시트|목록|명단|파워포인트|프레젠테이션|\b(documents?|files?|papers?|letters?|slides?|reports?|pdfs?|excel|sheets?|spreadsheets?|xlsx|csv|pptx?|presentations?|decks?)\b)/i.test(prompt)) files = namedDocuments(prompt, root, docTies);   // words, not parts ("wallpaper" is not "paper")
+    // Which file? A name that is in several subfolders, or documents that match the request equally well: the user
+    // picks (choices.ts) instead of a guess or an answer from no file. Find requests list them all themselves.
+    if (root && !files.length && !isFindRequest(prompt) && !serverIntent(prompt)) {
+      const home = homedir(), tilde = (abs: string) => (abs.startsWith(home + "/") ? "~/" + abs.slice(home.length + 1) : abs).normalize("NFC");
+      let pick: { name: string; paths: string[] } | undefined;
+      for (const m of prompt.matchAll(FILE_REF)) {
+        if (m[1].includes("/") || existsSync(resolve(root, m[1]))) continue;
+        const hit = findBasename(root, m[1]);
+        if (hit.length >= 2) { pick = { name: m[1], paths: hit.slice(0, 5) }; break; }
+      }
+      if (!pick && docTies.length >= 2) pick = { name: "", paths: docTies };
+      if (pick) {
+        const choices = pick.paths.map((r) => {
+          const t = tilde(resolve(root!, r));
+          return { label: t, prompt: pick!.name ? prompt.replace(pick!.name, t) : `${prompt} (${t})` };
+        });
+        return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "which_file", choices,
+          answer: pick.name ? (ko ? `\`${pick.name}\` 파일이 여러 곳에 있어요. 어느 파일인가요?` : `There are several files named \`${pick.name}\`. Which one?`)
+            : (ko ? "요청에 맞는 파일이 여러 개예요. 어느 파일인가요?" : "Several files match the request equally well. Which one?") });
+      }
+    }
     const spans = [...prompt.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
     const dangerous = spans.find((s) => gateCommand(s, root ?? homedir()).verdict === "deny");
     const health = await afm.health();
@@ -725,6 +775,7 @@ export class Controller {
         this.tel.verification({ taskId, kind: `skill_${ls}`, passed: r.verified, detail: r.detail });
         if (r.pendingEdit) return finish({ status: "answered_local", outcomeClass: "local_unverified", isProposal: true, answer: r.answer, pendingEdit: { ...r.pendingEdit, testCmd: r.pendingEdit.testCmd ?? detectTestCommand(root!) } });
         if (r.pendingCommand) return finish({ status: "ask_user", outcomeClass: "asked_user", answer: r.answer, pendingCommand: r.pendingCommand });
+        if (r.choices?.length) return finish({ status: "ask_user", outcomeClass: "asked_user", answer: r.answer, choices: r.choices });
         return finish({ status: "answered_local", outcomeClass: r.verified ? "local_verified" : "local_unverified", answer: r.answer });
       }
       return undefined;
@@ -845,7 +896,15 @@ export class Controller {
         : await findByName(terms, { project: root, kind: kindFromPrompt(prompt), max: 12 });
       this.tel.toolCall({ taskId, tool: "find_by_name", ok: true, durationMs: Date.now() - ts, resultChars: found.length });
       steps.push({ kind: "find", detail: `${found.length} results`, ms: Date.now() - ts });
-      return finish({ status: "answered_local", outcomeClass: "local_verified", answer: renderFound(found, terms, ko), revealPaths: found.map((f) => f.path) });
+      // the path asked for, and several files have that exact name: pick one, and its full path is the answer
+      const same = pathAsk(prompt) ? found.filter((f) => terms.some((t) => basename(f.path).normalize("NFC").toLowerCase() === t.normalize("NFC").toLowerCase())) : [];
+      if (same.length >= 2) {
+        const home = homedir(), tilde = (abs: string) => (abs.startsWith(home + "/") ? "~/" + abs.slice(home.length + 1) : abs).normalize("NFC");
+        const choices = same.slice(0, 8).map((f) => ({ label: tilde(f.path), answer: renderFound([f], terms, ko, true) }));
+        return finish({ status: "ask_user", outcomeClass: "asked_user", choices,
+          answer: ko ? `\`${basename(same[0].path)}\` 파일이 ${same.length}개 있어요. 어느 파일의 경로인가요?` : `There are ${same.length} files named \`${basename(same[0].path)}\`. Which one?` });
+      }
+      return finish({ status: "answered_local", outcomeClass: "local_verified", answer: renderFound(found, terms, ko, pathAsk(prompt)), revealPaths: found.map((f) => f.path) });
     }
 
     // A .tex file named by path ("compile /Users/me/Downloads/x/proposal_v4.tex"): that file and its folder, even
@@ -884,7 +943,12 @@ export class Controller {
         // a personal folder with several LaTeX projects and none named: ask instead of picking one
         if (!named && root && lroot === root && personalFolder(root)) {
           const dirs = [...new Set(mainTexFiles(root).map((f) => dirname(f)))];
-          if (dirs.length > 1) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "latex_no_main", answer: (ko ? "이 폴더에 LaTeX 문서가 여러 개 있어요. 어떤 파일을 컴파일할까요? 경로를 적어 주세요.\n\n" : "There are several LaTeX documents here. Which one? Give its path.\n\n") + mainTexFiles(root).slice(0, 8).map((f) => `- \`${f}\``).join("\n") });
+          if (dirs.length > 1) {
+            const home = homedir(), tilde = (abs: string) => (abs.startsWith(home + "/") ? "~/" + abs.slice(home.length + 1) : abs);
+            const choices = mainTexFiles(root).slice(0, 8).map((f) => ({ label: f, prompt: `${prompt} (${tilde(resolve(root!, f))})` }));
+            return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "latex_no_main", choices,
+              answer: ko ? "이 폴더에 LaTeX 문서가 여러 개 있어요. 어떤 파일을 컴파일할까요?" : "There are several LaTeX documents here. Which one?" });
+          }
         }
         const main = findMainTex(lroot, named);
         if (!main) return finish({ status: "ask_user", outcomeClass: "asked_user", reasonCode: "latex_no_main", answer: ko ? "\\documentclass와 \\begin{document}가 있는 메인 .tex 파일을 찾지 못했어요. 파일 이름을 알려 주세요." : "No main .tex (with \\documentclass and \\begin{document}) found. Which file is it?" });

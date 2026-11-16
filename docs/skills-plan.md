@@ -827,3 +827,90 @@ The remaining misses are requests that never reached the action step: earlier ru
 - The front-app and open-apps recipes use System Events, which asks for Automation permission the first time.
 
 Tests: tests/mac-recipes.test.ts (5): every recipe compiles and passes the gate, slot checks, times. npm test 227/227; skill eval 61/61.
+
+## 37. Image compression with a size target (2026-11-14)
+
+**Report.**
+- HEIC → JPG worked.
+- "Compress the file under 5MB" made a HEIC again.
+- "…under 5MB, but jpg format" only converted the file; the size did not go down.
+
+**Causes** (`mac-tasks.ts` convertPlan/convert):
+1. **No size target.** "under 5MB" was not read; compression was always one re-save at quality 70.
+2. **A named format overrode compression.** It turned "compress + jpg" into a plain conversion. HEIC compresses better than JPEG, so HEIC → JPG at default quality grows the file: 4.8 MB → 6.4 MB on the reported photo.
+3. **The original came back on follow-ups.** Spotlight keeps the original attached ("Files: IMG_6729.HEIC"), so a follow-up worked on the original, not the file just made.
+4. **Unit mismatch.** Sizes were in 1024-based MB, while Finder shows 1000-based MB: a "≤ 5 MB" file could read 5.04 MB in Finder.
+
+**Fix:**
+- **Size targets:** `sizeTarget` reads "under 5MB", "800 KB 이하", "2메가 미만" in Finder's decimal units.
+- **Compress + format:** a size limit or a compress word makes it a compression, in the format asked for. For images, 압축 means compression unless zip/묶 is said; "300px로 줄여줘" stays a resize.
+- **Reaching the target:** quality is searched (40–90). If quality 40 is still too big, the long side is scaled in 15% steps. The result is checked against the target. A file already under the target in the same format is left alone, because re-encoding a JPEG can make it larger.
+- **Follow-ups:** `followUpFile` works on the newest file made from the attached input in the last answer, unless the original is named, and says so.
+- **Visible sizes:** conversions show before → after, so a growing file is visible. Names no longer stack ("(converted) (compressed)" → "(compressed 2)").
+
+**On the reported photo** (a copy; 4.8 MB HEIC, 5712 px):
+
+| Step | Result |
+|---|---|
+| jpg | 6.4 MB (shown) |
+| "under 5MB" on that jpg | 4.6 MB, quality 59 |
+| "…but jpg format" | already under, no new file |
+| "2MB 이하로 압축" | 1.8 MB, quality 70, long side 2535 px |
+
+Tests: tests/mac-tasks.test.ts (+1). npm test 228/228; skill eval 61/61.
+
+## 38. PDF merge with order, pages and insertion (2026-11-14)
+
+**Before.** "a.pdf랑 b.pdf 합쳐줘" merged whole files in attached order. No order by request, no pages left out, no single-PDF page edits; the check compared page counts only.
+
+**Now** (`pdf-plan.ts`, code only, no AFM; `tools/pdftool assemble` + `sig`):
+- **Order:** the list the files are named in ("c.pdf, a.pdf and b.pdf"), relations ("b.pdf를 a.pdf 뒤에", "a.pdf 앞에 b.pdf를", "put b.pdf after c.pdf", "c.pdf를 맨 앞으로", "make b.pdf come first", "the second file first"), by name, reverse. When two or more files are named, attached files not named stay out (said in the answer).
+- **Pages per file, only or except:** numbers and ranges ("3쪽", "2~4페이지", "pages 1, 3 and 5"), first/last ("표지", "마지막 두 장", "the last 2 pages"), open ranges ("3쪽부터 끝까지", "3페이지까지", "up to page 4"), odd/even. A page phrase is tied to "page 3 of b.pdf" / "b.pdf의 3쪽" / "b.pdf without page 3"; phrases joined by "and/과" share file and mode ("a.pdf의 2쪽과 b.pdf의 3쪽을 빼고"). "합친 파일에서 3쪽" / "of the merged pdf" means the result.
+- **Insertion:** "b.pdf를 a.pdf 3쪽 뒤에 넣어줘", "insert b.pdf after page 2 of a.pdf", "between pages 3 and 4".
+- **One PDF:** "a.pdf에서 2, 4쪽 삭제", "짝수 페이지만 남겨줘", "extract pages 3-5" → "a (pages).pdf". Questions about pages (요약, 번역, "what does page 2 say") are not edits.
+- **Images** named with PDFs become pages.
+- **Never guessed:** a page with no file when several are merged ("합쳐줘. 2쪽은 빼고") is asked about; pages that do not exist, nothing left, a password-locked PDF → said plainly, no file made.
+- **Check:** every page of the new PDF is compared with the planned source page (hash of text, size, rotation); a mismatch deletes the output. The answer lists the order and the pages taken from each file.
+
+Tests: tests/pdf-plan.test.ts (5: 50 parser cases, routing, real files and errors). Skill eval: convert +2. npm test 233/233; skill eval 63/63. Through the controller with explicit ~/ paths: 3/3 edits correct (page text checked separately).
+
+## 39. Absolute path questions; bare names in subfolders (2026-11-16)
+
+**Report.** "STATUS_REPORT_KO.md 파일의 정확한 절대 경로를 알려줘" (open folder ~/Downloads) answered `Projects/demo/STATUS_REPORT_KO.md`.
+
+**Causes:**
+1. **Not a find request.** `finder.ts` FIND_VERB only knew "경로 알려" with no particle. "절대 경로를 알려줘", "파일 경로가 뭐야" and "full path of X" went to the document answer. Its tools see only paths relative to the open folder, so AFM answered a relative path (and added "가정:" lines).
+2. **Bare names in subfolders were not found.** `mentionedFiles` resolved a written file name only directly in the open folder, so "STATUS_….md 요약해줘" read nothing and answered that the content could not be found.
+
+**Fix:**
+- `PATH_ASK`/`pathAsk`: absolute/full/exact path, "경로를/가 … 알려/뭐", "path of/to" → find request. The answer gives the full absolute path in a code block (the exact-name match, or the only result) with a Finder link. Several files with the same name → listed with full paths and asked which one (reply by number reveals it). "PATH 환경변수…" is not a find request.
+- `findBasename`: a bare file name not in the open folder, found in exactly one subfolder (depth 5, 40k entries, no hidden folders or dependency trees, security gate), is that file. Two matches are not guessed.
+
+Tests: edit-session-finder.test.ts (+1). npm test 234/234; skill eval 63/63. Reported questions (copy of the controller run, root ~/Downloads): path ko/en/"경로가 뭐야" → absolute path; summary → reads Projects/demo/….
+
+## 40. Choices: asking back with options (2026-11-16)
+
+**Before.** A skill that could not decide either guessed, failed (no file read), or asked in text ("경로를 적어 주세요"). The next message was handled as a new request.
+
+**Now** (`choices.ts`; agent server pending kind `choice`; launcher buttons):
+- **Returning options.** A skill or the controller returns `choices: [{ label, prompt | answer }]` instead of guessing. The options are made by code from what is really there; AFM never invents them.
+- **The server keeps them** for 30 minutes and lists them under the answer, numbered.
+- **Replying.** A number ("2", "2번", "두 번째", "second") or a label picks one. Its `prompt` (the original request made exact: the file path or "b.pdf의 2쪽" written in) runs in the original folder, or its `answer` is shown. "예" asks for the number again; any other message is a new request and drops the options.
+- **Launcher.** The final SSE chunk carries `onbud.choices` (labels). Spotlight shows one button per option (⌘1…⌘9) and sends the label back. Older launchers and OpenCode reply by number.
+
+**Where options come from:**
+
+| Situation | Options |
+|---|---|
+| A file name in several subfolders (`which_file`) | each path; the request runs with that path |
+| Documents matching the request equally well (two words or more) | each file |
+| A PDF page phrase that fits several files | that page of each PDF, or of the merged result |
+| Several LaTeX documents, none named | each main .tex |
+| The path asked for, several files with that exact name | each path → its full absolute path |
+| Running a shortcut the user does not have, similar names exist | run each similar shortcut (after the usual approval) |
+
+**Checks:**
+- Test agent server (temporary home, fake token, port 11497): PDF page pick by number and by label, path pick by ordinal, "예" re-asks, an unrelated message cancels.
+- 212 earlier everyday questions on Desktop/Downloads: 0 new questions asked.
+- tests/choices.test.ts (3), spotlight-smoke "SSE: choices". npm test 237/237; skill eval 63/63.
+- Not yet tried by hand in the launcher (needs an app build).

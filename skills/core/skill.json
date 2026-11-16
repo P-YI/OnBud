@@ -33,7 +33,8 @@
     "afm_tool_*",
     "skill_*",
     "path_blocked",
-    "path_not_found"
+    "path_not_found",
+    "which_file"
   ],
   "capabilities": [
     "read",

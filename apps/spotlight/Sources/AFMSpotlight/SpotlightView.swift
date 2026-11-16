@@ -57,7 +57,7 @@ struct SpotlightView: View {
             }
             .frame(width: 34, height: 34)
             .opacity(state.running ? 0.45 : 1)
-            TextField(state.needsApproval ? "Reply, or use the buttons below" : state.attachments.isEmpty ? "Ask OnBud" : "Ask about the attached items", text: $state.query)
+            TextField(state.needsApproval || state.offersChoices ? "Reply, or use the buttons below" : state.attachments.isEmpty ? "Ask OnBud" : "Ask about the attached items", text: $state.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22))
                 .focused($focused)
@@ -147,7 +147,7 @@ struct SpotlightView: View {
             .help("Recent chats and activity")
 
             Spacer()
-            Text(state.needsApproval ? "⌘↩ yes · ⌘⌫ no" : "↩ ask · esc close")
+            Text(state.needsApproval ? "⌘↩ yes · ⌘⌫ no" : state.offersChoices ? "⌘1–⌘\(min(9, state.choices.count)) pick · ↩ ask · esc close" : "↩ ask · esc close")
                 .font(.caption).foregroundStyle(.tertiary)
             if !state.turns.isEmpty {
                 Button { state.collapsed.toggle() } label: {
@@ -194,7 +194,7 @@ struct SpotlightView: View {
                 Text("· \(state.turns.count) answer\(state.turns.count == 1 ? "" : "s") folded" + (state.olderInHistory > 0 ? ", \(state.olderInHistory) more in History" : ""))
                     .foregroundStyle(.tertiary)
                 Spacer()
-                if state.needsApproval || state.offersHandoff { Text("waiting for you").foregroundStyle(.orange) }
+                if state.needsApproval || state.offersHandoff || state.offersChoices { Text("waiting for you").foregroundStyle(.orange) }
                 else if state.running { ProgressView().controlSize(.small) }
             }
             .font(.callout).foregroundStyle(.secondary)
@@ -250,7 +250,33 @@ struct SpotlightView: View {
         }
     }
 
-    @ViewBuilder private var actions: some View {
+    private var actions: some View {
+        VStack(alignment: .leading, spacing: 8) { choiceButtons; actionRow }
+    }
+
+    @ViewBuilder private var choiceButtons: some View {
+        // Options the controller offered (which file, which PDF's page, …): one button each; ⌘1…⌘9 pick by number.
+        // The label goes back as the reply; typing a number or a new request works too.
+        if state.offersChoices && !state.running {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(state.choices.prefix(9).enumerated()), id: \.offset) { i, label in
+                    Button { state.send(label) } label: {
+                        HStack(spacing: 6) {
+                            Text("\(i + 1)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                            Text(label).lineLimit(1).truncationMode(.middle)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(KeyEquivalent(Character(String(i + 1))), modifiers: .command)
+                    .help(label)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var actionRow: some View {
         HStack(spacing: 8) {
             if state.needsApproval && !state.running {
                 Button("Yes, \(approveVerb)") { state.send("yes") }

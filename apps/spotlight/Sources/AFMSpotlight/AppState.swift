@@ -30,6 +30,8 @@ final class AppState: ObservableObject {
     @Published var query = ""
     @Published var turns: [Turn] = []
     @Published var awaiting: String?
+    /** Options the controller offered (awaiting "choice"); a button sends its label back. */
+    @Published var choices: [String] = []
     @Published var running = false
     @Published var notice: String?
     @Published var attachments: [Attachment] = []
@@ -108,7 +110,7 @@ final class AppState: ObservableObject {
         task?.cancel()
         conversation = Conversation(root: projectRoot)
         chatID = UUID()
-        turns = []; awaiting = nil; running = false; notice = nil; lastSent = nil; attachments = []; collapsed = false
+        turns = []; awaiting = nil; choices = []; running = false; notice = nil; lastSent = nil; attachments = []; collapsed = false
         showEarlier = false; olderInHistory = 0
         updateWidget()
     }
@@ -139,7 +141,7 @@ final class AppState: ObservableObject {
         turns.append(Turn(prompt: text, attachments: attachments.map(\.label)))
         trimTurns()
         attachments = []
-        awaiting = nil; running = true; collapsed = false; showEarlier = false
+        awaiting = nil; choices = []; running = true; collapsed = false; showEarlier = false
         let client = ControllerClient(token: token, setting: setting, web: pluginEnabled(.web), routerModel: activeRouter?.name)
         let messages = conversation.messages, root = conversation.root
         let chat = chatID
@@ -157,8 +159,9 @@ final class AppState: ObservableObject {
                         self.updateLast { $0.meta = meta }
                     case .step(let kind, let detail):
                         self.updateLast { $0.progress = StepLabel.text(kind, detail) }
-                    case .done(let a):
+                    case .done(let a, let options):
                         self.awaiting = a
+                        self.choices = a == "choice" ? options : []
                     }
                 }
             } catch is CancellationError {
@@ -213,6 +216,7 @@ final class AppState: ObservableObject {
 
     var needsApproval: Bool { awaiting.map { Conversation.approvable.contains($0) } ?? false }
     var offersHandoff: Bool { awaiting == "handoff" }
+    var offersChoices: Bool { awaiting == "choice" && !choices.isEmpty }
 
     // MARK: attachments
 
@@ -294,7 +298,7 @@ final class AppState: ObservableObject {
             t.running = false
             return t
         }
-        awaiting = nil; running = false; attachments = []; collapsed = false; showEarlier = false; olderInHistory = 0
+        awaiting = nil; choices = []; running = false; attachments = []; collapsed = false; showEarlier = false; olderInHistory = 0
         trimTurns()
         lastSent = chat.date
         updateWidget()

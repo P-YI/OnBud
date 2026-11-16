@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -145,4 +145,26 @@ test("LaTeX edits must keep \\cite/\\ref/\\label keys", async () => {
   const before = "Facts \\cite{a,b} in Table~\\ref{tab:x}.\\label{sec:i}";
   assert.deepEqual(latexKeysLost(before, "Facts are shown \\cite{a,b} in Table~\\ref{tab:x}.\\label{sec:i}"), []);
   assert.deepEqual(latexKeysLost(before, "Facts \\textit{a,b} in Table~\\ref{tab:x}.\\label{sec:i}"), ["\\cite{a}", "\\cite{b}"]);
+});
+
+test("path questions: absolute path asked → find request with the full path; a bare name in a subfolder is found", async () => {
+  const { pathAsk, renderFound } = await import("../services/context-builder/finder.ts");
+  const { findBasename, mentionedFiles } = await import("../services/controller/controller.ts");
+  for (const p of ["STATUS_REPORT.md 파일의 정확한 절대 경로를 알려줘.", "What is the full path of STATUS_REPORT.md?", "STATUS_REPORT.md 파일 경로가 뭐야?", "what's the path to notes.txt"]) {
+    assert.ok(isFindRequest(p), p); assert.ok(pathAsk(p), p);
+  }
+  assert.ok(!pathAsk("STATUS_REPORT.md 어디 있어?"));
+  assert.ok(!isFindRequest("PATH 환경변수에 경로 추가하는 법 알려줘"));
+  const f = { path: "/Users/u/Downloads/Projects/demo/STATUS_REPORT.md", dir: false, bytes: 8000, modified: "2026-11-16", hidden: false } as any;
+  const one = renderFound([f], ["STATUS_REPORT.md"], true, true);
+  assert.match(one, /절대 경로:\n\n```\n\/Users\/u\/Downloads\/Projects\/demo\/STATUS_REPORT\.md\n```/);
+  const g = { ...f, path: "/Users/u/Desktop/STATUS_REPORT.md" };
+  assert.match(renderFound([f, g], ["STATUS_REPORT.md"], false, true), /There are 2 files with that name\. Which one\?[\s\S]*`\/Users\/u\/Desktop\/STATUS_REPORT\.md`/);
+  const dir = mkdtempSync(join(tmpdir(), "bn-"));
+  mkdirSync(join(dir, "Projects", "demo"), { recursive: true }); writeFileSync(join(dir, "Projects", "demo", "STATUS_REPORT.md"), "# status");
+  mkdirSync(join(dir, ".hidden")); writeFileSync(join(dir, ".hidden", "STATUS_REPORT.md"), "x");
+  assert.deepEqual(findBasename(dir, "status_report.md"), ["Projects/demo/STATUS_REPORT.md"]);
+  assert.deepEqual(mentionedFiles("STATUS_REPORT.md 요약해줘", dir).map((x) => x.path), ["Projects/demo/STATUS_REPORT.md"]);
+  mkdirSync(join(dir, "other")); writeFileSync(join(dir, "other", "STATUS_REPORT.md"), "y");
+  assert.deepEqual(mentionedFiles("STATUS_REPORT.md 요약해줘", dir), []);   // two matches: not guessed
 });

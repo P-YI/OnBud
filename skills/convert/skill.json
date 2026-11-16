@@ -2,7 +2,7 @@
   "id": "convert",
   "version": "0.1.0",
   "contract": "1.1",
-  "description": "Converting files the user names into NEW files next to them: image format and size (sips), PDF merge and images to PDF (PDFKit), documents (textutil), zip. Never overwrites or deletes.",
+  "description": "Converting files the user names into NEW files next to them: image format and size (sips), PDF merge in a chosen order with pages left out, picked or inserted, one PDF's pages removed or kept, and images to PDF (PDFKit; every page checked against its source), documents (textutil), zip. Never overwrites or deletes.",
   "examples": [
     "Convert photo.heic to jpg",
     "a.pdf랑 b.pdf 하나로 합쳐줘"
@@ -28,7 +28,10 @@
     "convert": [
       "Resize banner.png to 800 px wide",
       "scan1.jpg scan2.jpg를 PDF 하나로 만들어줘",
-      "Turn notes.txt into a Word document"
+      "Turn notes.txt into a Word document",
+      "report.pdf에서 3쪽 빼고 appendix.pdf랑 합쳐줘",
+      "Insert b.pdf after page 2 of a.pdf",
+      "a.pdf 짝수 페이지만 남겨줘"
     ]
   }
 }

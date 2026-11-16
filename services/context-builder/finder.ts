@@ -30,6 +30,12 @@ export function isPrivate(abs: string, home = homedir()): boolean {
 }
 
 const FIND_VERB = /(찾아|찾기|찾을|어디\s*(에\s*)?있|어딨|위치|경로\s*(알려|좀)|\bfind\b|\blocate\b|\bwhere('?s| is| are)\b|\bsearch for\b)/i;
+// "절대 경로를 알려줘", "파일 경로가 뭐야", "full path of X", "what's the path to X" (2026-11-16): before, only "경로 알려"
+// without a particle was a find request; the rest went to the document answer, whose tools only see paths relative
+// to the open folder, so it answered "Projects/demo/x.md" for a file in ~/Downloads.
+const PATH_ASK = /((절대|전체|정확한|풀|full|absolute|exact|complete)\s*(파일\s*)?(경로|path)|경로\s*(를|은|는|가|이|좀|도)?\s*(알려|뭐|말해|보여|줘|적어|복사|어떻게|어디)|\b(file\s+)?path\s+(of|to|for)\b|\bwhat('?s| is) the (file\s+)?path\b|\bpath name\b)/i;
+/** The request asks for the path itself: the answer gives full absolute paths. */
+export const pathAsk = (prompt: string) => PATH_ASK.test(prompt);
 const FILE_NOUN = /(파일|폴더|디렉토리|디렉터리|문서|논문|사진|이미지|슬라이드|발표|\bfiles?\b|\bfolders?\b|\bdirector(y|ies)\b|\bdocuments?\b|\bpdf\b|\bslides?\b|\bimages?\b|\bphotos?\b)/i;
 // file names in any script ("예산.xlsx"), and dot-folders
 const NAME_TOKEN = /(?:^|[\s`'"(])(\.[\p{L}\p{N}_.-]{2,}|[\p{L}\p{N}_-][\p{L}\p{N}_.-]*\.[A-Za-z0-9]{1,6})(?=$|[\s`'")?,])/gu;
@@ -39,7 +45,7 @@ const NAME_TOKEN = /(?:^|[\s`'"(])(\.[\p{L}\p{N}_.-]{2,}|[\p{L}\p{N}_-][\p{L}\p{
 const WHICH_FILE = /\bwhich (files?|documents?|pdfs?|papers?|slides?)\b.{0,40}\b(mention|contain|about|discuss|talk)|(어떤|어느)\s?(파일|문서|논문|pdf|PDF).{0,30}(언급|들어\s?있|포함|나와|관련)/i;
 export function isFindRequest(prompt: string): boolean {
   if (WHICH_FILE.test(prompt)) return true;
-  if (!FIND_VERB.test(prompt)) return false;
+  if (!FIND_VERB.test(prompt) && !PATH_ASK.test(prompt)) return false;
   if (/\b(defined|definition|implemented|called|used)\b|정의|구현|호출/.test(prompt)) return false;
   return FILE_NOUN.test(prompt) || [...prompt.matchAll(NAME_TOKEN)].length > 0;
 }
@@ -152,7 +158,7 @@ export async function findByName(terms: string[], opts: { scope?: string; projec
 export const fileUrl = (abs: string, dir = false) => "file://" + encodeURI(abs + (dir && !abs.endsWith("/") ? "/" : "")).replace(/[()#?]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
 
 /** Markdown list: name, a link to the folder that holds it (opens Finder), size and date. */
-export function renderFound(found: Found[], terms: string[], ko: boolean): string {
+export function renderFound(found: Found[], terms: string[], ko: boolean, fullPath = false): string {
   const home = homedir();
   const short = (p: string) => (p.startsWith(home + "/") ? "~/" + relative(home, p) : p).normalize("NFC");
   if (!found.length) {
@@ -166,8 +172,20 @@ export function renderFound(found: Found[], terms: string[], ko: boolean): strin
     const what = f.dir ? (ko ? "폴더" : "folder") : `${kindOf(f.path)}, ${humanSize(f.bytes)}`;
     const by = (f as Partial<FoundBy>).by;
     const how = by && BY[by] ? ` (${BY[by][ko ? 0 : 1]})` : "";
-    return `${i + 1}. **${basename(f.path).normalize("NFC")}**${f.hidden ? (ko ? " (숨김)" : " (hidden)") : ""}${how} — ${what}, ${f.modified}\n   [${short(folder)}](${fileUrl(folder, true)})`;
+    return `${i + 1}. **${basename(f.path).normalize("NFC")}**${f.hidden ? (ko ? " (숨김)" : " (hidden)") : ""}${how} — ${what}, ${f.modified}\n   ${fullPath ? `\`${f.path.normalize("NFC")}\`\n   ` : ""}[${short(folder)}](${fileUrl(folder, true)})`;
   });
+  // asked for the path: the exact-name match (or the only result) first, as a full absolute path
+  if (fullPath) {
+    const exact = found.filter((f) => terms.some((t) => basename(f.path).normalize("NFC").toLowerCase() === t.normalize("NFC").toLowerCase()));
+    const one = exact.length === 1 ? exact[0] : found.length === 1 ? found[0] : undefined;
+    if (one) {
+      const head = ko ? `**${basename(one.path).normalize("NFC")}**의 절대 경로:\n\n\`\`\`\n${one.path.normalize("NFC")}\n\`\`\`` : `Absolute path of **${basename(one.path).normalize("NFC")}**:\n\n\`\`\`\n${one.path.normalize("NFC")}\n\`\`\``;
+      // the other rows keep their numbers: a reply "2" reveals found[1]
+      const others = found.length > 1 ? (ko ? `\n\n비슷한 이름 ${found.length - 1}개도 있어요:\n\n` : `\n\n${found.length - 1} more with a similar name:\n\n`) + rows.filter((_, i) => found[i] !== one).join("\n") : "";
+      return head + `\n\n[${ko ? "Finder에서 폴더 열기" : "Open the folder in Finder"}](${fileUrl(dirname(one.path), true)})` + others;
+    }
+    if (exact.length > 1) return (ko ? `같은 이름의 파일이 ${exact.length}개 있어요. 어느 것인가요? 번호로 답해 주세요 (Finder에서 보여 드려요).\n\n` : `There are ${exact.length} files with that name. Which one? Reply with a number (I will reveal it in Finder).\n\n`) + rows.join("\n");
+  }
   const tail = ko
     ? `\n\n링크를 누르면 Finder에서 해당 폴더가 열려요. 링크가 열리지 않으면 번호로 답해 주세요 (예: \`1\`) — Finder에서 그 항목을 선택해서 보여 드려요.`
     : `\n\nClick a link to open the folder in Finder. If links do not open, reply with a number (e.g. \`1\`) and I will reveal that item in Finder.`;
