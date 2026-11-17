@@ -21,7 +21,7 @@ public enum StreamEvent: Sendable, Equatable {
     case step(String, String)
     /** Final chunk: what the controller now waits for (command, edit, apply, handoff, web, job, reveal, choice) or
      *  nil, and for "choice" the options' labels (sent back as the reply when one is picked). */
-    case done(awaiting: String?, choices: [String] = [])
+    case done(awaiting: String?, choices: [String] = [], undo: String? = nil)
 }
 
 public enum ClientError: Error, LocalizedError, Equatable {
@@ -45,7 +45,7 @@ public func parseSSELine(_ line: String) -> StreamEvent? {
           let choice = (obj["choices"] as? [[String: Any]])?.first else { return nil }
     if let finish = choice["finish_reason"] as? String, !finish.isEmpty {
         let meta = obj["onbud"] as? [String: Any]
-        return .done(awaiting: meta?["awaiting"] as? String, choices: meta?["choices"] as? [String] ?? [])
+        return .done(awaiting: meta?["awaiting"] as? String, choices: meta?["choices"] as? [String] ?? [], undo: meta?["undo"] as? String)
     }
     if let delta = choice["delta"] as? [String: Any], let text = delta["content"] as? String, !text.isEmpty {
         return .text(text)
@@ -92,6 +92,14 @@ public struct ControllerClient: Sendable {
         return req
     }
 
+    /** Stops the running request (closing the stream stops it too; this also covers a connection already gone). */
+    public func cancel() async {
+        var req = URLRequest(url: Backend.url(Port.controller, "/v1/cancel"), timeoutInterval: 5)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
     public func stream(messages: [ChatMessage], root: String?) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -121,7 +129,7 @@ public struct ControllerClient: Sendable {
     public func send(messages: [ChatMessage], root: String?) async throws -> (text: String, awaiting: String?) {
         var text = "", awaiting: String?
         for try await ev in stream(messages: messages, root: root) {
-            switch ev { case .text(let t): text += t; case .done(let a, _): awaiting = a; case .step: break }
+            switch ev { case .text(let t): text += t; case .done(let a, _, _): awaiting = a; case .step: break }
         }
         return (text, awaiting)
     }

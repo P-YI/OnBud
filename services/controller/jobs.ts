@@ -13,6 +13,7 @@
 //   apply    nothing reaches the real project until the user approves; then the branch diff is applied
 // The main checkout is never edited while a job runs.
 
+import { beginEdit } from "./undo.ts";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -836,8 +837,12 @@ export async function applyJob(job: Job): Promise<{ ok: boolean; files: string[]
   const target = ws.kind === "worktree" ? ws.repoTop! : job.root;
   const chk = await git(["apply", "--check", "--whitespace=nowarn", pf], target);
   if (chk.code !== 0) return { ok: false, files, error: `does_not_apply: ${chk.out.slice(0, 200)}` };
+  // undo (undo.ts): every file the patch touches is backed up first, deleted ones included
+  const touched = [...new Set([...files, ...[...patch.matchAll(/^--- a\/(.+)$/gm)].map((m) => m[1])])];
+  const rec = beginEdit(job.request, touched.map((f) => join(target, f)));
   const r = await git(["apply", "--whitespace=nowarn", pf], target);
-  if (r.code !== 0) return { ok: false, files, error: r.out.slice(0, 200) };
+  if (r.code !== 0) { rec.abandon(); return { ok: false, files, error: r.out.slice(0, 200) }; }
+  rec.done();
   job.status = "applied"; saveJob(job);
   journal(job, `\n## Applied to ${job.root} at ${now()}\n${files.map((f) => `- ${f}`).join("\n")}\n`);
   return { ok: true, files };

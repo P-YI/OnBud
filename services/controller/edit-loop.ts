@@ -6,6 +6,7 @@
 //   4. Only after the user approves again is the real file written, and only if it has not changed since.
 // Anything bigger (several files, design, repeated test failures) goes to Codex.
 
+import { writeWithUndo } from "./undo.ts";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -267,14 +268,14 @@ export async function trialEdit(root: string, edit: EditProposal, testCmd: strin
 }
 
 /** Write the approved edit to the real file, only if the file is still what the edit was made against. */
-export function applyToProject(root: string, edit: EditProposal): { ok: boolean; error?: string } {
+export function applyToProject(root: string, edit: EditProposal, request = ""): { ok: boolean; error?: string } {
   const g = gatePath(edit.path, root, "write");
   if (g.verdict !== "allow") return { ok: false, error: `blocked:${g.reasons.join(",")}` };
   const current = readFileSync(join(root, edit.path), "utf8");
   if (sha(current) !== edit.baseHash) return { ok: false, error: "file_changed_since_proposal" };
   const applied = applyEdit(current, edit.oldText, edit.newText);
   if (!applied.ok) return { ok: false, error: applied.error };
-  writeFileSync(join(root, edit.path), applied.text);
+  writeWithUndo(request || `edit ${edit.path}`, join(root, edit.path), applied.text);   // backed up, then written in one step
   return { ok: true };
 }
 

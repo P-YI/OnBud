@@ -19,6 +19,8 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { gatePath, redact } from "../security/gate.ts";
 import { option } from "../skills/settings.ts";
 import type { Choice } from "./choices.ts";
+import { Staging } from "./atomic.ts";
+import { recordCreated } from "./undo.ts";
 import { pageExprs, pageRanges, pdfPlan, resolvePdfPlan } from "./pdf-plan.ts";
 
 export interface TaskCtx { root: string; prompt: string; files: { path: string }[]; ko: boolean; history?: string }
@@ -49,11 +51,11 @@ const SIPS_FMT: Record<string, string> = { png: "png", jpg: "jpeg", jpeg: "jpeg"
 const TEXTUTIL_FMT = ["txt", "html", "rtf", "rtfd", "doc", "docx", "odt", "wordml", "webarchive"];
 
 /** A path next to `like` that does not exist yet: "name (converted).ext", "name (converted 2).ext", … */
-export function freshPath(dir: string, stem: string, tag: string, ext: string): string {
+export function freshPath(dir: string, stem: string, tag: string, ext: string, taken?: Set<string>): string {
   stem = stem.replace(/(\s\((converted|compressed|merged|pages|archive)(\s\d+)?\))+$/, "");   // "a (converted) (compressed)" → "a (compressed)"
   for (let i = 1; ; i++) {
     const p = join(dir, `${stem} (${tag}${i > 1 ? ` ${i}` : ""}).${ext}`);
-    if (!existsSync(p)) return p;
+    if (!existsSync(p) && !taken?.has(p)) return p;
   }
 }
 
@@ -120,7 +122,19 @@ export function followUpFile(prompt: string, inputs: string[], history: string |
   return last;
 }
 
+/** Outputs appear only when the conversion succeeded (atomic.ts): written under hidden temporary names, moved into
+ *  place together at the end, removed on a failure or when the request is stopped. Recorded for undo (undo.ts). */
 export async function convert(c: TaskCtx): Promise<TaskResult> {
+  const st = new Staging();
+  try {
+    const r = await convertStaged(c, st);
+    if (r.verified) { const made = st.commit(); if (made.length) recordCreated(c.prompt, made); }
+    return r;
+  } finally { st.discardAll(); }
+}
+
+async function convertStaged(c: TaskCtx, st: Staging): Promise<TaskResult> {
+  const fresh = (dir: string, stem: string, tag: string, ext: string) => st.reserve(freshPath(dir, stem, tag, ext, st.taken()));
   let abs = c.files.map((f) => resolve(c.root || homedir(), f.path)).filter((p) => existsSync(p));
   const follow = followUpFile(c.prompt, abs, c.history);
   if (follow) abs = [follow];
@@ -137,11 +151,11 @@ export async function convert(c: TaskCtx): Promise<TaskResult> {
   const dir = dirname(abs[0]), stem = basename(abs[0], extname(abs[0]));
   const outs: string[] = [];
   let check = "";
-  if (plan.op === "merge_pdf" || plan.op === "pdf_pages") return pdfAssemble(c, abs.filter((f) => /\.pdf$/i.test(f) || IMG.test(f)), plan.op, follow);
+  if (plan.op === "merge_pdf" || plan.op === "pdf_pages") return pdfAssemble(c, abs.filter((f) => /\.pdf$/i.test(f) || IMG.test(f)), plan.op, follow, fresh, st);
   if (plan.op === "images_pdf") {
     const bin = await helper("pdftool");
     if (!bin) return { answer: T(c.ko, "PDF 도구를 만들지 못했어요 (Xcode Command Line Tools 필요: `xcode-select --install`).", "Could not build the PDF tool (needs the Command Line Tools: `xcode-select --install`)."), verified: false, detail: "no_pdftool" };
-    const out = freshPath(dir, stem, "converted", "pdf");
+    const out = fresh(dir, stem, "converted", "pdf");
     const r = await run(bin, ["images", out, ...abs]);
     if (r.code !== 0) return { answer: T(c.ko, `변환 실패: ${r.err.trim()}`, `Conversion failed: ${r.err.trim()}`), verified: false, detail: "failed" };
     const want = abs.length;
@@ -152,7 +166,7 @@ export async function convert(c: TaskCtx): Promise<TaskResult> {
   } else if (plan.op === "image") {
     for (const p of abs.filter((f) => IMG.test(f))) {
       const ext = plan.fmt ? (plan.fmt === "jpeg" ? "jpg" : plan.fmt) : extname(p).slice(1);
-      const out = freshPath(dirname(p), basename(p, extname(p)), "converted", ext);
+      const out = fresh(dirname(p), basename(p, extname(p)), "converted", ext);
       const args = [...(plan.fmt ? ["-s", "format", SIPS_FMT[plan.fmt]] : [])];
       // "800 px wide" sets the width, "600 px tall" the height, a bare "800 px" the longer side
       if (plan.px) args.push(...(/(wide|width|너비|가로)/i.test(c.prompt) ? ["--resampleWidth"] : /(tall|height|높이|세로)/i.test(c.prompt) ? ["--resampleHeight"] : ["-Z"]), String(plan.px));
@@ -182,7 +196,7 @@ export async function convert(c: TaskCtx): Promise<TaskResult> {
       const ext = plan.fmt ? (plan.fmt === "jpeg" ? "jpg" : plan.fmt) : target === format ? extname(p).slice(1) : target === "jpeg" ? "jpg" : target;
       // already under the size asked for, in the format asked for: nothing to do (re-encoding a JPEG can make it larger)
       if (plan.maxBytes && before <= plan.maxBytes && target === format) { notes.push(T(c.ko, `\`${basename(p)}\`은(는) 이미 ${mb(plan.maxBytes)} 이하예요 (${mb(before)}). 새 파일을 만들지 않았어요.`, `\`${basename(p)}\` is already under ${mb(plan.maxBytes)} (${mb(before)}); no new file.`)); continue; }
-      const out = freshPath(dirname(p), basename(p, extname(p)), "compressed", ext);
+      const out = fresh(dirname(p), basename(p, extname(p)), "compressed", ext);
       const lossy = target === "jpeg" || target === "heic";
       const attempt = async (q: number | undefined, px: number | undefined, dst: string) => {
         const args = ["-s", "format", target, ...(lossy && q ? ["-s", "formatOptions", String(q)] : []), ...(px ? ["-Z", String(px)] : [])];
@@ -220,20 +234,20 @@ export async function convert(c: TaskCtx): Promise<TaskResult> {
       // no target and no new format: a result that is not smaller is not kept
       if (!plan.maxBytes && !plan.fmt && size >= before) { unlinkSync(out); notes.push(T(c.ko, `\`${basename(p)}\`: 더 작게 만들지 못했어요 (${mb(before)}).`, `\`${basename(p)}\`: could not make it smaller (${mb(before)}).`)); continue; }
       outs.push(out);
-      notes.push(`\`${basename(out)}\`: ${mb(before)} → ${mb(size)}${plan.maxBytes ? ` (≤ ${mb(plan.maxBytes)} ✓)` : ""}, ${how}${size >= before ? T(c.ko, " — 형식을 바꾸느라 원본보다 커요", " — larger than the original because of the format change") : ""}`);
+      notes.push(`\`${basename(st.finalOf(out))}\`: ${mb(before)} → ${mb(size)}${plan.maxBytes ? ` (≤ ${mb(plan.maxBytes)} ✓)` : ""}, ${how}${size >= before ? T(c.ko, " — 형식을 바꾸느라 원본보다 커요", " — larger than the original because of the format change") : ""}`);
     }
     if (!outs.length) return { answer: notes.join("\n"), verified: notes.every((n) => /(already under|이미 .* 이하)/.test(n)), detail: "not_smaller" };
     check = notes.join("; ");
   } else if (plan.op === "doc") {
     for (const p of abs.filter((f) => DOC.test(f))) {
-      const out = freshPath(dirname(p), basename(p, extname(p)), "converted", plan.fmt!);
+      const out = fresh(dirname(p), basename(p, extname(p)), "converted", plan.fmt!);
       const r = await run("/usr/bin/textutil", ["-convert", plan.fmt!, "-output", out, p]);
       if (r.code !== 0 || !existsSync(out)) return { answer: T(c.ko, `변환 실패: ${basename(p)}`, `Conversion failed: ${basename(p)}`), verified: false, detail: "failed" };
       outs.push(out);
     }
     check = `${outs.length} document(s)`;
   } else {
-    const out = freshPath(dir, stem, "archive", "zip");
+    const out = fresh(dir, stem, "archive", "zip");
     const r = await run("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", abs[0], out]);
     if (r.code !== 0 || !existsSync(out)) return { answer: T(c.ko, "압축 실패", "Zip failed"), verified: false, detail: "failed" };
     outs.push(out); check = "zip";
@@ -241,13 +255,13 @@ export async function convert(c: TaskCtx): Promise<TaskResult> {
   const home = homedir();
   const short = (p: string) => (p.startsWith(home + "/") ? "~/" + p.slice(home.length + 1) : p);
   const from = follow ? T(c.ko, `방금 만든 \`${basename(follow)}\`로 작업했어요.\n\n`, `Worked on \`${basename(follow)}\`, the file made in the last step.\n\n`) : "";
-  return { answer: from + T(c.ko, "새 파일을 만들었어요 (원본은 그대로예요):", "Created (the originals are unchanged):") + "\n\n" + outs.map((o) => `- \`${short(o)}\``).join("\n") + `\n\n_${T(c.ko, "확인", "Check")}: ${check}_`,
+  return { answer: from + T(c.ko, "새 파일을 만들었어요 (원본은 그대로예요):", "Created (the originals are unchanged):") + "\n\n" + outs.map((o) => `- \`${short(st.finalOf(o))}\``).join("\n") + `\n\n_${T(c.ko, "확인", "Check")}: ${check}_`,
     verified: true, detail: `${plan.op}: ${outs.length} file(s), ${check}` };
 }
 
 /** Merging PDFs (and images as pages) in the order asked, with pages left out or picked, or one PDF's pages
  *  (pdf-plan.ts). The new PDF is checked page by page against its sources (text, size and rotation of each page). */
-async function pdfAssemble(c: TaskCtx, ins: string[], op: "merge_pdf" | "pdf_pages", follow?: string): Promise<TaskResult> {
+async function pdfAssemble(c: TaskCtx, ins: string[], op: "merge_pdf" | "pdf_pages", follow: string | undefined, fresh: (dir: string, stem: string, tag: string, ext: string) => string, st: Staging): Promise<TaskResult> {
   const bin = await helper("pdftool");
   if (!bin) return { answer: T(c.ko, "PDF 도구를 만들지 못했어요 (Xcode Command Line Tools 필요: `xcode-select --install`).", "Could not build the PDF tool (needs the Command Line Tools: `xcode-select --install`)."), verified: false, detail: "no_pdftool" };
   const plan = pdfPlan(c.prompt, ins);
@@ -281,7 +295,7 @@ async function pdfAssemble(c: TaskCtx, ins: string[], op: "merge_pdf" | "pdf_pag
   const all = (s: { file: number; pages: number[] }) => s.pages.length === counts[s.file] && s.pages.every((p, i) => p === i + 1);
   if (op === "pdf_pages" && segs.length === 1 && all(segs[0])) return { verified: false, detail: "no_change", answer: T(c.ko, "바뀌는 페이지가 없어요. 뺄 페이지나 남길 페이지를 알려 주세요.", "Nothing changes. Say which pages to remove or keep.") };
   const first = ins[segs[0].file];
-  const out = freshPath(dirname(first), basename(first, extname(first)), op === "merge_pdf" ? "merged" : "pages", "pdf");
+  const out = fresh(dirname(first), basename(first, extname(first)), op === "merge_pdf" ? "merged" : "pages", "pdf");
   const r = await run(bin, ["assemble", out, ...segs.flatMap((s) => [isPdf(ins[s.file]) ? s.pages.join(",") : "all", ins[s.file]])], 120_000);
   if (r.code !== 0 || !existsSync(out)) return { answer: T(c.ko, `PDF를 만들지 못했어요: ${r.err.trim()}`, `Could not make the PDF: ${r.err.trim()}`), verified: false, detail: "failed" };
   // the check: every page of the new PDF is the page planned for it
@@ -306,7 +320,7 @@ async function pdfAssemble(c: TaskCtx, ins: string[], op: "merge_pdf" | "pdf_pag
   const from = follow ? T(c.ko, `방금 만든 \`${basename(follow)}\`로 작업했어요.\n\n`, `Worked on \`${basename(follow)}\`, the file made in the last step.\n\n`) : "";
   const check = T(c.ko, `${got.length}쪽, 모든 페이지가 원본과 일치`, `${got.length} pages, every page matches its source`);
   return { verified: true, detail: `${op}: ${segs.map((s) => `${basename(ins[s.file])}[${pageRanges(s.pages)}]`).join(" + ")}, ${got.length}/${want.length} pages`,
-    answer: from + T(c.ko, "새 PDF를 만들었어요 (원본은 그대로예요):", "Created a new PDF (the originals are unchanged):") + `\n\n- \`${short(out)}\`\n\n` + T(c.ko, "순서와 페이지:", "Order and pages:") + "\n" + lines.join("\n") + left + `\n\n_${T(c.ko, "확인", "Check")}: ${check}_` };
+    answer: from + T(c.ko, "새 PDF를 만들었어요 (원본은 그대로예요):", "Created a new PDF (the originals are unchanged):") + `\n\n- \`${short(st.finalOf(out))}\`\n\n` + T(c.ko, "순서와 페이지:", "Order and pages:") + "\n" + lines.join("\n") + left + `\n\n_${T(c.ko, "확인", "Check")}: ${check}_` };
 }
 
 // ---------------------------------------------------------------- shortcuts

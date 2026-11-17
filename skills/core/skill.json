@@ -34,7 +34,9 @@
     "skill_*",
     "path_blocked",
     "path_not_found",
-    "which_file"
+    "which_file",
+    "cancelled",
+    "local_undo"
   ],
   "capabilities": [
     "read",
@@ -51,5 +53,12 @@
     "afmCalls": 6,
     "latencyMs": 60000,
     "frontierCalls": 0
+  },
+  "entries": {
+    "undo": [
+      "되돌려줘",
+      "Undo what you just did",
+      "방금 바꾼 거 원래대로 해줘"
+    ]
   }
 }

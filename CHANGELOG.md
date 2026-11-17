@@ -3,6 +3,13 @@
 What each OnBud release added, newest first. Full notes per release are in `docs/release-notes-<version>.md`;
 downloads are on [GitHub Releases](https://github.com/P-YI/OnBud/releases).
 
+## [0.2.6](docs/release-notes-0.2.6.md) — 2026-11-17 · stop and undo
+- **Stop** (⌘.): a request ends at once; running tools and model calls are cancelled, nothing is left pending.
+- **Undo** (⇧⌘Z or "되돌려줘"): conversions, applied edits, applied local jobs and reversible Mac actions; files
+  are restored only if unchanged since OnBud left them, otherwise you choose. Kept 14 days.
+- **Atomic outputs:** conversions appear only when complete and never overwrite a file.
+- Launcher: a deleted project folder falls back to Desktop; at most three quick actions, the rest under More.
+
 ## [0.2.5](docs/release-notes-0.2.5.md) — 2026-11-16 · files, pages and choices
 - **Choices instead of guesses:** when a request could mean several things (same-name files, an ambiguous PDF
   page, several LaTeX documents, similar Shortcuts), the panel shows buttons (⌘1…⌘9).

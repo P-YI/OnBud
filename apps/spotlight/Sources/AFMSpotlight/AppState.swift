@@ -32,6 +32,8 @@ final class AppState: ObservableObject {
     @Published var awaiting: String?
     /** Options the controller offered (awaiting "choice"); a button sends its label back. */
     @Published var choices: [String] = []
+    /** The undo record the last answer made (the server's `onbud.undo`): the Undo button reverses it. */
+    @Published var undoID: String?
     @Published var running = false
     @Published var notice: String?
     @Published var attachments: [Attachment] = []
@@ -98,10 +100,38 @@ final class AppState: ObservableObject {
     var modelLabel: String { setting == .s3 ? routerLabel : Setting.s2.label }
 
     func probe() async {
+        checkFolder()
         status = await Backend.probe(paths: paths)
         routerModels = status.decima ? await Backend.routerModels() : []
         for id in PluginID.allCases { plugins[id] = Plugins.detect(id, backend: status, paths: paths) }
         probed = true
+    }
+
+    /** The open folder was deleted or moved: back to ~/Desktop, saying so (before, the panel kept the missing folder
+     *  and showed only "Commands"). Recent folders that are gone are dropped. */
+    func checkFolder() {
+        if let r = projectRoot, ProjectFolder.problem(r) != nil {
+            let desktop = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop").path
+            let name = URL(fileURLWithPath: r).lastPathComponent
+            projectRoot = FileManager.default.fileExists(atPath: desktop) ? desktop : nil
+            notice = "The folder “\(name)” no longer exists; switched to \(projectRoot.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "no folder")."
+        }
+        let live = recentFolders.filter { ProjectFolder.problem($0) == nil }
+        if live != recentFolders { recentFolders = live }
+    }
+
+    /** Stop: the running request ends now (the controller kills its tools and keeps no half-made files). */
+    func stop() {
+        guard running, let token = paths.readToken() else { return }
+        task?.cancel(); task = nil
+        let client = ControllerClient(token: token, setting: setting)
+        Task { await client.cancel() }
+        let partial = turns.last?.reply ?? ""
+        conversation.messages.append(ChatMessage(role: "assistant", content: partial.isEmpty ? "(stopped)" : partial + "\n\n(stopped)"))
+        updateLast { $0.running = false; $0.progress = nil; $0.reply = partial.isEmpty ? "Stopped. Nothing was left half-made; the originals are unchanged." : partial + "\n\n_Stopped._" }
+        running = false; awaiting = nil; choices = []; undoID = nil
+        conversation.awaiting = nil
+        saveChat(); updateWidget()
     }
 
     // MARK: conversation
@@ -110,7 +140,7 @@ final class AppState: ObservableObject {
         task?.cancel()
         conversation = Conversation(root: projectRoot)
         chatID = UUID()
-        turns = []; awaiting = nil; choices = []; running = false; notice = nil; lastSent = nil; attachments = []; collapsed = false
+        turns = []; awaiting = nil; choices = []; undoID = nil; running = false; notice = nil; lastSent = nil; attachments = []; collapsed = false
         showEarlier = false; olderInHistory = 0
         updateWidget()
     }
@@ -141,7 +171,7 @@ final class AppState: ObservableObject {
         turns.append(Turn(prompt: text, attachments: attachments.map(\.label)))
         trimTurns()
         attachments = []
-        awaiting = nil; choices = []; running = true; collapsed = false; showEarlier = false
+        awaiting = nil; choices = []; undoID = nil; running = true; collapsed = false; showEarlier = false
         let client = ControllerClient(token: token, setting: setting, web: pluginEnabled(.web), routerModel: activeRouter?.name)
         let messages = conversation.messages, root = conversation.root
         let chat = chatID
@@ -159,9 +189,10 @@ final class AppState: ObservableObject {
                         self.updateLast { $0.meta = meta }
                     case .step(let kind, let detail):
                         self.updateLast { $0.progress = StepLabel.text(kind, detail) }
-                    case .done(let a, let options):
+                    case .done(let a, let options, let undo):
                         self.awaiting = a
                         self.choices = a == "choice" ? options : []
+                        self.undoID = undo
                     }
                 }
             } catch is CancellationError {
@@ -298,7 +329,7 @@ final class AppState: ObservableObject {
             t.running = false
             return t
         }
-        awaiting = nil; choices = []; running = false; attachments = []; collapsed = false; showEarlier = false; olderInHistory = 0
+        awaiting = nil; choices = []; undoID = nil; running = false; attachments = []; collapsed = false; showEarlier = false; olderInHistory = 0
         trimTurns()
         lastSent = chat.date
         updateWidget()

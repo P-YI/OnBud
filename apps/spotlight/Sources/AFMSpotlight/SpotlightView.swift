@@ -147,7 +147,7 @@ struct SpotlightView: View {
             .help("Recent chats and activity")
 
             Spacer()
-            Text(state.needsApproval ? "⌘↩ yes · ⌘⌫ no" : state.offersChoices ? "⌘1–⌘\(min(9, state.choices.count)) pick · ↩ ask · esc close" : "↩ ask · esc close")
+            Text(state.running ? "⌘. stop · esc close" : state.needsApproval ? "⌘↩ yes · ⌘⌫ no" : state.offersChoices ? "⌘1–⌘\(min(9, state.choices.count)) pick · ↩ ask · esc close" : "↩ ask · esc close")
                 .font(.caption).foregroundStyle(.tertiary)
             if !state.turns.isEmpty {
                 Button { state.collapsed.toggle() } label: {
@@ -206,15 +206,23 @@ struct SpotlightView: View {
 
     /** One-click requests that fit the folder (shown while the panel is empty). */
     private var quickActions: some View {
-        let actions = QuickActions.suggest(root: state.projectRoot, latex: state.pluginEnabled(.latex) && state.pluginStatus(.latex).installed)
+        let all = QuickActions.suggest(root: state.projectRoot, latex: state.pluginEnabled(.latex) && state.pluginStatus(.latex).installed)
+        let (row, more) = QuickActions.layout(all)
         return VStack(spacing: 0) {
             Divider().opacity(0.5)
-            // Up to eight chips in a git repo with papers and documents: scroll sideways rather than clip.
+            // Three chips at most, the rest under "More" (QuickActions.layout); the scroll view only guards narrow panels.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(actions) { a in
+                    ForEach(row) { a in
                         Button { state.send(a.prompt) } label: { Label(a.title, systemImage: a.symbol) }
                             .buttonStyle(Chip()).fixedSize()
+                    }
+                    if !more.isEmpty {
+                        Menu {
+                            ForEach(more) { a in Button { state.send(a.prompt) } label: { Label(a.title, systemImage: a.symbol) } }
+                        } label: { Label("More", systemImage: "ellipsis.circle") }
+                        .menuStyle(.button).buttonStyle(Chip()).fixedSize()
+                        .help(more.map(\.title).joined(separator: ", "))
                     }
                 }
                 .padding(.horizontal, 14)
@@ -278,6 +286,17 @@ struct SpotlightView: View {
 
     private var actionRow: some View {
         HStack(spacing: 8) {
+            if state.running {
+                // Stop: ends the request now; tools are killed and no half-made file is kept (⌘.)
+                Button { state.stop() } label: { Label("Stop", systemImage: "stop.circle") }
+                    .keyboardShortcut(".", modifiers: .command)
+                    .help("Stop this request (⌘.)")
+            } else if let id = state.undoID, !state.needsApproval, !state.offersChoices {
+                // Undo: reverses the change the last answer made (only if the files are still as OnBud left them)
+                Button { state.send("undo \(id)") } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .help("Undo this change (⇧⌘Z). Files changed since are not overwritten without asking.")
+            }
             if state.needsApproval && !state.running {
                 Button("Yes, \(approveVerb)") { state.send("yes") }
                     .keyboardShortcut(.return, modifiers: .command)

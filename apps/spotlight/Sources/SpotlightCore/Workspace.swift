@@ -143,6 +143,7 @@ public enum Activity {
 
 public struct QuickAction: Sendable, Equatable, Identifiable {
     public let title: String, prompt: String, symbol: String
+    public init(title: String, prompt: String, symbol: String) { self.title = title; self.prompt = prompt; self.symbol = symbol }
     public var id: String { title }
 }
 
@@ -170,6 +171,13 @@ public enum QuickActions {
         out.append(QuickAction(title: "Terminal here", prompt: "open a terminal here", symbol: "terminal"))
         out.append(QuickAction(title: "Commands", prompt: "show commands", symbol: "questionmark.circle"))
         return out
+    }
+
+    /** At most `shown` chips in the row, the rest in a "More" menu (a git repository with a paper and documents had
+     *  up to nine chips, wider than the panel). The order above is the priority: what fits the folder first, then
+     *  Terminal here and Commands. When everything fits, there is no menu. */
+    public static func layout(_ all: [QuickAction], shown: Int = 3) -> (row: [QuickAction], more: [QuickAction]) {
+        all.count <= shown + 1 ? (all, []) : (Array(all.prefix(shown)), Array(all.dropFirst(shown)))
     }
 }
 

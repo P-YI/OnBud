@@ -20,6 +20,9 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
 // MARK: 1. core
 
 check("SSE: choices", parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"onbud":{"setting":"s2","awaiting":"choice","choices":["a.pdf의 2쪽","b.pdf의 2쪽"]}}"#) == .done(awaiting: "choice", choices: ["a.pdf의 2쪽", "b.pdf의 2쪽"]))
+check("SSE: undo record", parseSSELine(#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"onbud":{"setting":"s2","awaiting":null,"undo":"20261117010203-ab12"}}"#) == .done(awaiting: nil, choices: [], undo: "20261117010203-ab12"))
+check("quick actions: at most three chips, the rest under More", { let all = (1...9).map { QuickAction(title: "a\($0)", prompt: "", symbol: "") }; let l = QuickActions.layout(all); return l.row.count == 3 && l.more.count == 6 && QuickActions.layout(Array(all.prefix(4))).more.isEmpty }())
+check("a deleted folder is not a project folder", ProjectFolder.problem(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop/onbud-no-such-folder-\(UUID().uuidString)").path) != nil)
 check("SSE: content delta", parseSSELine(#"data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#) == .text("hi"))
 check("SSE: keep-alive ignored", parseSSELine(": working") == nil)
 check("SSE: [DONE] ignored", parseSSELine("data: [DONE]") == nil)

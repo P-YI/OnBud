@@ -16,6 +16,9 @@ public enum ProjectFolder {
         if rel.split(separator: "/").contains(where: { $0.hasPrefix(".") }) {
             return "Hidden folders (like ~/.ssh or ~/.config) can hold keys and tokens; pick a project folder instead."
         }
+        // a folder deleted or moved since it was picked (the panel then showed only "Commands")
+        var dir: ObjCBool = false
+        if !FileManager.default.fileExists(atPath: p, isDirectory: &dir) || !dir.boolValue { return "That folder no longer exists." }
         return nil
     }
 }

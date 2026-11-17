@@ -26,10 +26,12 @@ export class ApfelProvider implements AFMProvider {
   private fetchImpl: typeof fetch;
 
   constructor(opts: ApfelOptions = {}) {
-    this.baseURL = opts.baseURL ?? "http://127.0.0.1:11434";
+    // ONBUD_APFEL_URL (tests): another apfel on this Mac only; anything not on loopback is ignored
+    const env = process.env.ONBUD_APFEL_URL;
+    this.baseURL = opts.baseURL ?? (env && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env) ? env : "http://127.0.0.1:11434");
     this.model = opts.model ?? "apple-foundationmodel";
     this.timeoutMs = opts.defaultTimeoutMs ?? 30_000;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? ((i: any, o?: any) => fetch(i, o));   // the global fetch at call time (cancel.ts gives it the request's signal)
     const file = opts.tokenFile ?? join(process.env.ONBUD_HOME ?? join(homedir(), "OnBud"), "config", "apfel.token");
     try {
       this.token = opts.token ?? readFileSync(file, "utf8").trim();

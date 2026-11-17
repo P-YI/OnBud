@@ -914,3 +914,38 @@ Tests: edit-session-finder.test.ts (+1). npm test 234/234; skill eval 63/63. Rep
 - 212 earlier everyday questions on Desktop/Downloads: 0 new questions asked.
 - tests/choices.test.ts (3), spotlight-smoke "SSE: choices". npm test 237/237; skill eval 63/63.
 - Not yet tried by hand in the launcher (needs an app build).
+
+## 41. Stop, undo, atomic outputs; quick-action chips (2026-11-17)
+
+**Before:**
+- No Stop. Closing the stream (New chat) left the server working until the end, and the next request got 429 "busy".
+- AFM edits overwrote files with no backup.
+- Conversions wrote straight to the final name.
+- A deleted project folder stayed selected and showed only "Commands".
+- A git repository with a paper and documents had up to nine chips.
+
+**Stop** (`cancel.ts`):
+- Each request runs with an AbortSignal (AsyncLocalStorage). `installCancelHooks` gives every `execFile`/`spawn` (unless detached or with its own signal) and every `fetch` that signal, so tools are killed and AFM, Decima and web calls are aborted.
+- The tracked AFM provider checks the signal before and after each call; `Cancelled` ends the request with "Stopped".
+- Triggers: the client closing the connection (launcher Stop, ⌘.) or `POST /v1/cancel`.
+- Nothing is left waiting from a stopped request, and the server is free at once.
+- Test server with a slow fake AFM: the AFM request was aborted at the AFM side, the next request was accepted immediately, and `/v1/cancel` answered in 3 ms.
+- Not yet checked: whether the real apfel stops generating when its client goes away.
+
+**Whole files only** (`atomic.ts`):
+- Convert outputs are written under hidden temporary names next to the target and moved into place together only on success. A stopped or failed run leaves nothing. A new output never replaces an existing file (a link fails instead).
+- Overwrites (edits, undo) are one rename after an fsync.
+
+**Undo** (`undo.ts`, `undo-skill.ts`):
+- **What is recorded:** convert outputs (created); applied AFM edits and applied local jobs, with every file the patch touches backed up first, deleted ones included; approved Mac actions with a clear opposite (dark mode, volume with the level read before, mute, Wi-Fi, Bluetooth, hidden files).
+- **Exactness:** each file's SHA-256 as OnBud left it. Undo changes nothing unless every file still matches. Otherwise it offers choices (§40): restore anyway (the current content is kept in the record), take the earlier version out as "<name> (before OnBud)", or leave it.
+- **Safety:** files OnBud made are moved into the record, never deleted. Records are kept 14 days in ~/OnBud/runtime/undo (700/600).
+- **Triggers:** "되돌려줘", "undo", or the launcher's Undo button (⇧⌘Z, server meta `onbud.undo`). Approvals of irreversible commands (rm, -delete, empty Trash, erase, send) are marked "cannot be undone".
+- **Routing:** the router runs undo only when the request says so. 124 earlier everyday questions: 0 undo matches.
+
+**Launcher:**
+- **Missing folder:** `ProjectFolder.problem` now rejects a missing folder. On show, a deleted folder falls back to ~/Desktop with a notice, and gone recent folders are dropped.
+- **Chips:** at most three, the rest under "More" (`QuickActions.layout`; folder-specific actions first, then Terminal here, Commands). Four or fewer are all shown.
+- **Stop and Undo buttons.**
+
+Tests: tests/undo-cancel.test.ts (5); spotlight-smoke (+3). npm test 242/242; skill eval 63/63. Launcher buttons not yet tried by hand.

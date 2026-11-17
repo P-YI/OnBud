@@ -25,6 +25,7 @@ import { frontierReachable } from "./frontier-opencode.ts";
 import { helpLanguage, helpTopic, isHelpRequest, renderHelp, unknownGitCommand } from "./help.ts";
 import { gateCommand, gatePath, redact } from "../security/gate.ts";
 import type { Choice } from "./choices.ts";
+import { Cancelled, checkCancelled } from "./cancel.ts";
 import { loadPolicy, systemFor, type Policy } from "../policy/policy.ts";
 import { NullTelemetry, projectHash, type OutcomeClass, type TelemetrySink } from "../telemetry/telemetry.ts";
 import { MemoryStore, renderMemory } from "../memory/memory.ts";
@@ -642,7 +643,9 @@ export class Controller {
       name: inner.name,
       health: () => inner.health(),
       async generate(req: AFMRequest): Promise<AFMResult> {
+        checkCancelled();   // a stopped request makes no further AFM calls (cancel.ts)
         const r = await inner.generate(req);
+        checkCancelled();
         tel.modelCall({ taskId, provider: inner.name, model: "apple-foundationmodel", purpose: purposeOf(req), ok: r.ok, failure: r.failure,
           promptTokens: r.usage?.prompt, completionTokens: r.usage?.completion, latencyMs: r.latencyMs, costType: "local" });
         return r;
@@ -653,7 +656,15 @@ export class Controller {
   /** One request: the routing below, then the reply-language contract (services/skills/language.ts) on whatever
    *  answer came back. ONBUD_LANG_CONTRACT: on (default) translates, shadow logs a mismatch, off skips it. */
   async handle(task: Task): Promise<Outcome> {
-    const o = await this.route(task);
+    let o: Outcome;
+    try { o = await this.route(task); }
+    catch (e) {
+      if (!(e instanceof Cancelled)) throw e;
+      // stopped by the user (cancel.ts): nothing more runs; files are only ever renamed into place when complete
+      const ko = hasHangul(task.prompt);
+      return { taskId: "cancelled", status: "failed", outcomeClass: "local_unverified" as OutcomeClass, route: "LOCAL_AFM" as Action, reasonCode: "cancelled", taskType: "other" as TaskType, steps: [{ kind: "cancelled", detail: "stopped by the user" }],
+        policyVersion: this.policy.version, policyHash: this.policy.hash, answer: ko ? "작업을 중단했어요. 만들다 만 파일은 남기지 않았고, 원본은 그대로예요." : "Stopped. No half-made files were left, and the originals are unchanged." };
+    }
     const mode = contractMode();
     if (mode === "off" || !o.answer || (o.status !== "answered_local" && o.status !== "ask_user")) return o;
     const { text: prompt } = redact(task.prompt);

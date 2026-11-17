@@ -6,6 +6,7 @@
 // security-gate plugin redacts secrets, and streams its answer back into the same chat.
 // usage: node --experimental-strip-types --experimental-sqlite bin/afm-agent-server.ts   (PORT=11435)
 
+import { installCancelHooks, withCancel } from "../services/controller/cancel.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -22,6 +23,7 @@ import { contractMode, requestLanguage } from "../services/skills/language.ts";
 import { classifyCommand, execCommand, renderResult } from "../services/context-builder/terminal.ts";
 import { revealInFinder } from "../services/context-builder/finder.ts";
 import { choicesText, matchChoice, type Choice } from "../services/controller/choices.ts";
+import { inverseOf, latestId, markCommandUndone, recordCommand } from "../services/controller/undo.ts";
 import { copilotChat, vscodeCli } from "../services/context-builder/apps.ts";
 import { settle, startSession } from "../services/context-builder/sessions.ts";
 import { applyToProject, diffOf, type EditProposal } from "../services/controller/edit-loop.ts";
@@ -30,6 +32,7 @@ import { buildCheckpoint, isCompactionRequest } from "../services/controller/com
 import { handOffSession, isSessionId, startSessionIn } from "../services/controller/opencode-session.ts";
 import { readFileSync as readText } from "node:fs";
 
+installCancelHooks();   // before any provider is built: child processes and fetch follow the request's stop signal
 const PORT = Number(process.env.AFM_AGENT_PORT ?? 11435);
 const HOME = process.env.ONBUD_HOME ?? join(homedir(), "OnBud");
 const TOKEN = readFileSync(join(HOME, "config", "apfel.token"), "utf8").trim();
@@ -93,6 +96,9 @@ interface Pending {
 // Persisted (mode 600) so a restart — e.g. node --watch after a code edit — does not drop an approval.
 const PENDING_FILE = join(HOME, "runtime", "state", "pending.json");
 const pending = new Map<string, Pending>();
+let currentRequest: AbortController | undefined;   // the running chat request (one at a time: `busy`)
+// commands whose effect OnBud cannot reverse (deleting, emptying the Trash, erasing, sending)
+const IRREVERSIBLE = /(empty (the )?trash|\brm\s+-|\brm\s+[^|;&]*\S|\s-delete\b|\bsrm\b|diskutil\s+(erase|reformat)|\bshred\b|send (the )?(message|mail|email)|\bdd\s+if=)/i;
 try {
   for (const [k, v] of Object.entries(JSON.parse(readFileSync(PENDING_FILE, "utf8")) as Record<string, Pending>)) if (Date.now() - v.at < 30 * 60_000) pending.set(k, v);
 } catch { /* first start */ }
@@ -268,8 +274,16 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
     ? (s: { kind: string; detail: string }) => res.write(chunk({}, null, { onbud: { step: s.kind, detail: String(s.detail ?? "").slice(0, 160) } }))
     : undefined;
   const controller = controllerFor(setting, String(req.headers["x-onbud-router-model"] ?? "") || undefined);
+  // Stop (cancel.ts): the client closing the connection (the launcher's Stop button, New chat) or POST /v1/cancel
+  // aborts this request: child processes are killed, AFM and web calls aborted, the controller stops at its next step.
+  const ac = new AbortController();
+  currentRequest = ac;
+  res.on("close", () => { if (!res.writableEnded) { ac.abort(); if (ping) clearInterval(ping); } });
+  const stoppedText = () => (ko ? "작업을 중단했어요. 만들다 만 파일은 남기지 않았고, 원본은 그대로예요." : "Stopped. No half-made files were left, and the originals are unchanged.");
   try {
+   await withCancel(ac.signal, async () => {
     let waiting = pending.get(key);
+    const undoBefore = latestId();
     let text: string;
     let capsuleTokens = 0;
     // A reply to offered options: the picked option runs (its exact request, in the folder of the original), or its
@@ -286,9 +300,12 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
     // the normal path: the controller handles the request, and what it leaves waiting is kept for the next reply
     const handleFresh = async (ask: string, at: string | undefined) => {
       const out = await controller.handle({ prompt: ask, root: at, history: history || undefined, frontEnd: "opencode", onStep });
+      if (ac.signal.aborted) return stoppedText();   // nothing is left waiting from a stopped request
       const edits = needsEdits(ask, out.reasonCode);
       const wr = out.workRoot ?? at;   // a path named in the request moved the work there
       if (out.status === "escalation_required") pending.set(key, { kind: "handoff", prompt: ask, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, at: Date.now(), sessionID, edits });
+      // an approval for something that cannot be taken back says so (undo.ts covers files and Mac settings only)
+      if (out.pendingCommand && IRREVERSIBLE.test(out.pendingCommand) && out.reasonCode !== "local_undo" && !/(되돌릴 수 없|cannot be undone)/i.test(out.answer ?? "")) out.answer = (out.answer ?? "") + (ko ? "\n\n⚠ **되돌릴 수 없는 동작이에요.** OnBud의 되돌리기로도 복구되지 않아요." : "\n\n⚠ **This cannot be undone**, not even with OnBud's undo.");
       if (out.pendingCommand) pending.set(key, { kind: "command", prompt: ask, capsule: out.capsule ?? "", root: wr, reason: out.reasonCode, command: out.pendingCommand, background: out.background, at: Date.now() });
       if (out.pendingEdit) pending.set(key, { kind: "edit", prompt: ask, capsule: "", root: wr, reason: out.reasonCode, edit: out.pendingEdit.edit, testCmd: out.pendingEdit.testCmd, at: Date.now() });
       if (out.pendingJob) pending.set(key, { kind: "job", prompt: ask, capsule: "", root: wr, reason: out.reasonCode, job: out.pendingJob, at: Date.now(), sessionID });
@@ -390,7 +407,7 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
         }
       } else if (waiting.kind === "apply" && isYes(prompt) && waiting.root && waiting.edit) {
         const before = readText(join(waiting.root, waiting.edit.path), "utf8");
-        const r = applyToProject(waiting.root, waiting.edit);
+        const r = applyToProject(waiting.root, waiting.edit, waiting.prompt);
         text = r.ok
           ? (ko ? `\`${waiting.edit.path}\`에 적용했어요. 되돌리려면 \`git checkout -p -- ${waiting.edit.path}\` 또는 편집기에서 실행 취소하세요.` : `Applied to \`${waiting.edit.path}\`. To undo: \`git checkout -p -- ${waiting.edit.path}\` or your editor's undo.`)
             + "\n\n```diff\n" + (await diffOf(waiting.edit.path, before, readText(join(waiting.root, waiting.edit.path), "utf8"))) + "\n```"
@@ -419,8 +436,12 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
         if (cls.mode === "blocked") {
           text = (ko ? "보안 게이트가 이 명령을 막았어요" : "The security gate blocked this command") + ` (${cls.reasons.join(", ")}).`;
         } else {
+          // undo (undo.ts): a Mac action with a clear opposite is recorded; its state is read before it runs
+          const inv = waiting.reason === "local_undo" ? undefined : await inverseOf(waiting.command, async (cmd) => (await execCommand(cmd, cwd, { timeoutMs: 5000 })).output);
           const r = await execCommand(waiting.command, cwd, { timeoutMs: 120_000 });
           telemetry.toolCall({ tool: "run_command_approved", ok: r.exitCode === 0, durationMs: r.ms, resultChars: r.output.length });
+          if (r.exitCode === 0 && inv) recordCommand(waiting.prompt, waiting.command, inv);
+          if (r.exitCode === 0 && waiting.reason === "local_undo") markCommandUndone(waiting.command);
           // A command a skill proposed for a Mac action (dark mode, a recipe, an AFM-written command) is the answer
           // itself: show its result. Running the request again would only propose the same command again.
           if (!waiting.root || /^(local_mac_control|local_mac_action|local_shortcuts)$/.test(waiting.reason ?? "")) text = (r.exitCode === 0 ? (ko ? "✅ 실행했어요." : "✅ Done.") : (ko ? `실행했지만 오류로 끝났어요 (종료 코드 ${r.exitCode}).` : `It ran but failed (exit ${r.exitCode}).`)) + (r.output.trim() ? "\n\n```\n" + r.output.trim().slice(0, 3000) + "\n```" : "");
@@ -467,7 +488,11 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
     const usage = { prompt_tokens: capsuleTokens, completion_tokens: Math.ceil(text.length / 3), total_tokens: capsuleTokens + Math.ceil(text.length / 3) };
     // Launcher requests also get what is waiting for the user's answer, so it can show yes/no buttons.
     const w2 = pending.get(key);
-    const extra = setting ? { onbud: { setting, awaiting: w2?.kind ?? null, ...(w2?.kind === "choice" ? { choices: (w2.choices ?? []).map((c) => c.label) } : {}) } } : {};
+    const madeUndo = latestId() !== undoBefore ? latestId() : undefined;   // this request changed something undoable
+    if (madeUndo) text += ko ? `\n\n_되돌리려면 \`되돌려줘\`라고 하세요 (기록 \`${madeUndo}\`)._` : `\n\n_To reverse it, say \`undo\` (record \`${madeUndo}\`)._`;
+    const extra = setting ? { onbud: { setting, awaiting: w2?.kind ?? null, ...(w2?.kind === "choice" ? { choices: (w2.choices ?? []).map((c) => c.label) } : {}), ...(madeUndo ? { undo: madeUndo } : {}) } } : {};
+    if (res.destroyed) return;   // the client left (stopped): nobody to answer
+    if (ac.signal.aborted) text = stoppedText();
     if (body.stream) {
       res.write(chunk({ content: text }, null));
       res.write(chunk({}, "stop", { usage, ...extra }));
@@ -476,7 +501,9 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, body: any) 
       send(res, 200, { id, object: "chat.completion", created, model: MODEL_ID, usage, ...extra,
         choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: text } }] });
     }
+   });
   } catch (e: any) {
+    if (res.destroyed) return;
     if (body.stream) { res.write(chunk({ content: `AFM controller error: ${e?.message ?? e}` }, "stop")); res.end("data: [DONE]\n\n"); }
     else send(res, 500, { error: { message: String(e?.message ?? e) } });
   } finally {
@@ -492,6 +519,12 @@ const server = createServer((req, res) => {
   if (!authorized(req)) return send(res, 401, { error: { message: "unauthorized" } });
   if (req.method === "GET" && url.pathname === "/v1/models") {
     return send(res, 200, { object: "list", data: [{ id: MODEL_ID, object: "model", owned_by: "onbud" }] });
+  }
+  // Stop the running request (the launcher's Stop button; also when its connection is already gone)
+  if (req.method === "POST" && url.pathname === "/v1/cancel") {
+    const running = busy && !!currentRequest && !currentRequest.signal.aborted;
+    currentRequest?.abort();
+    return send(res, 200, { cancelled: running });
   }
   if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
     let size = 0;

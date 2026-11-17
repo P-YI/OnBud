@@ -34,6 +34,7 @@ import { redact } from "../security/gate.ts";
 import { sha, type EditProposal } from "./edit-loop.ts";
 import { projectFiles } from "./jobs.ts";
 import type { Choice } from "./choices.ts";
+import { undoIntent, undoSkill } from "./undo-skill.ts";
 import { browserTab, convert, macControl, pdfPageEdit, personal, shortcutsSkill } from "./mac-tasks.ts";
 import { findApp } from "../context-builder/apps.ts";
 import { serverIntent } from "../server/server-skill.ts";
@@ -42,11 +43,11 @@ import { codexUsageIntent } from "./codex-usage.ts";
 import { quickAnswer } from "./quick-answer.ts";
 
 export type LocalSkill = "commit_message" | "change_summary" | "release_notes" | "error_triage" | "extract_table" | "translate" | "docstrings" | "privacy_scan" | "csv_json" | "sheet_lookup" | "slides_outline" | "git_overview" | "github_status" | "mac_health" | "open_app" | "security_check" | "launch_app" | "copilot"
-  | "convert" | "shortcuts" | "mac_control" | "browser_tab" | "personal" | "server" | "quick_answer";
+  | "convert" | "shortcuts" | "mac_control" | "browser_tab" | "personal" | "server" | "quick_answer" | "undo";
 /** Skills that work without a project folder, and skills a delegated (read-only, MCP) task never runs. */
-export const NO_ROOT = new Set<LocalSkill>(["quick_answer", "convert", "mac_health", "open_app", "security_check", "launch_app", "copilot", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
+export const NO_ROOT = new Set<LocalSkill>(["undo", "quick_answer", "convert", "mac_health", "open_app", "security_check", "launch_app", "copilot", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
 export const WRITES_FILES = new Set<LocalSkill>(["csv_json", "convert", "translate", "docstrings"]);
-export const NOT_DELEGATED = new Set<LocalSkill>(["open_app", "launch_app", "copilot", "convert", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
+export const NOT_DELEGATED = new Set<LocalSkill>(["undo", "open_app", "launch_app", "copilot", "convert", "shortcuts", "mac_control", "browser_tab", "personal", "server"]);
 export interface SkillContext { afm: AFMProvider; root: string; prompt: string; files: { path: string }[]; ko: boolean; history?: string; decima?: DecimaClient; timeoutMs?: number }
 export interface SkillResult { answer: string; verified: boolean; pendingEdit?: { edit: EditProposal; testCmd?: string }; pendingCommand?: string; detail: string; declined?: boolean; choices?: Choice[] }   // declined: not this skill after all; the controller goes on
 
@@ -134,6 +135,8 @@ export function detectLocalSkill(prompt: string, files: { path: string }[]): Loc
 }
 
 function detectByRules(prompt: string, files: { path: string }[]): LocalSkill | undefined {
+  // undo the last OnBud change (undo-skill.ts): before everything else, "원래대로 해줘" is not a new request
+  if (undoIntent(prompt)) return "undo";
   const p = prompt;
   const has = (re: RegExp) => files.some((f) => re.test(f.path));
   // A message to write, not a question about existing commits ("What are the 3 most recent commit messages?").
@@ -198,6 +201,7 @@ export function routedSkillApplies(skill: LocalSkill, prompt: string, files: { p
     case "launch_app": return !!launchTarget(prompt) || !!settingsPaneIntent(prompt) || WIFI_PASSWORD.test(prompt) || !!finderFolder(prompt);
     case "server": return serverIntent(prompt);
     case "quick_answer": return !!quickAnswer(prompt, /[가-힣]/.test(prompt));
+    case "undo": return undoIntent(prompt);   // never reverses anything unless the request itself says so
     default: return true;
   }
 }
@@ -230,6 +234,7 @@ export async function runLocalSkill(skill: LocalSkill, c: SkillContext): Promise
     case "mac_control": return macControl(c);
     case "browser_tab": return browserTab(c);
     case "personal": return personal(c);
+    case "undo": return undoSkill(c.prompt, c.ko);
     case "quick_answer": { const { quickAnswer: qa } = await import("./quick-answer.ts"); const r = qa(c.prompt, c.ko); return r ? { answer: r.answer, verified: true, detail: `${r.kind} ${r.detail}` } : { answer: "", verified: false, detail: "none", declined: true }; }
     case "server": { const { serverSkill } = await import("../server/server-skill.ts"); return serverSkill(c); }
     case "commit_message": return commitMessage(c);
