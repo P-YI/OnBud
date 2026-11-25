@@ -3,6 +3,12 @@
 What each OnBud release added, newest first. Full notes per release are in `docs/release-notes-<version>.md`;
 downloads are on [GitHub Releases](https://github.com/P-YI/OnBud/releases).
 
+## [0.2.7](docs/release-notes-0.2.7.md) — 2026-11-25 · updates
+- **Update check, with your consent:** asked once; then OnBud checks GitHub once a day and shows what changed.
+- **Update on your click:** through Homebrew, or the release DMG checked against the published checksum (the old
+  app goes to the Trash); the controller update is offered afterwards.
+- Folder search for terminal requests looks in the project and the named folders before your home folder.
+
 ## [0.2.6](docs/release-notes-0.2.6.md) — 2026-11-17 · stop and undo
 - **Stop** (⌘.): a request ends at once; running tools and model calls are cancelled, nothing is left pending.
 - **Undo** (⇧⌘Z or "되돌려줘"): conversions, applied edits, applied local jobs and reversible Mac actions; files

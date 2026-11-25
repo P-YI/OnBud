@@ -973,8 +973,16 @@ export async function terminalFolder(prompt: string, root?: string): Promise<{ d
     if ([...bases, root, H].some((b) => b && childDir(b, w))) names.push(w);
     else if (/^[A-Za-z0-9._-]{2,}$/.test(w) && !BARE_STOP.test(w)) loose.push(w);
   }
+  // Searching the whole home folder is the last resort (2026-11-25): it is slow, and walking ~/Desktop, ~/Documents
+  // and ~/Downloads makes macOS ask for folder access, which blocked the test run. The project and the folders
+  // mentioned come first; home only when they have no match.
+  const firstHit = (bs: (string | undefined)[], n: string, depth: number) => {
+    const near = [...bases, root].filter(Boolean) as string[];
+    const r = [...new Set(near.flatMap((b) => findUnder(b, n, depth)))];
+    return r.length || !bs.includes(H) ? r : findUnder(H, n, depth);
+  };
   if (!names.length && loose.length) {
-    const found = [...new Set([...bases, root, H].filter(Boolean).flatMap((b) => findUnder(b!, loose.at(-1)!, 3)))].filter((x, _, a) => !a.some((y) => y !== x && x.startsWith(y + "/")));
+    const found = firstHit([...bases, root, H], loose.at(-1)!, 3).filter((x, _, a) => !a.some((y) => y !== x && x.startsWith(y + "/")));
     if (found.length === 1) return { dir: found[0] };
     if (found.length > 1) return { ask: found.slice(0, 5) };
   }
@@ -983,7 +991,7 @@ export async function terminalFolder(prompt: string, root?: string): Promise<{ d
     // Starting points: the known folders mentioned and the other named folders (resolved), else none (global).
     let starts = [...bases];
     for (const n of names.slice(0, -1)) {
-      const found = (starts.length ? starts : [root, H].filter(Boolean) as string[]).flatMap((b) => findUnder(b, n, 3));
+      const found = starts.length ? starts.flatMap((b) => findUnder(b, n, 3)) : firstHit([root, H], n, 3);
       if (found.length) starts = found;
     }
     const scoped = starts.flatMap((b) => findUnder(b, target, 4));

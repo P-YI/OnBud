@@ -271,6 +271,22 @@ added under its old name is replaced by `mcp.onbud` (the diff shows it).
 - If the file changed after the diff was shown, it refuses to write.
 - Comments in the merged file are not kept; they remain in the backup.
 
+## Updates
+
+Settings > **Updates** (asked once at first launch; off until you allow it):
+- **Check:** at most once a day, one GET to `https://api.github.com/repos/P-YI/OnBud/releases/latest`. The
+  User-Agent is `OnBud/<version>`; nothing about the user, their files or their settings is sent. **Check now**
+  runs it at once.
+- **Offer:** a newer version is announced once, with the release notes' "Changes" bullets; Settings keeps an
+  **Update…** button. Nothing is installed without that click.
+- **Update** runs a visible script in Terminal (`SpotlightCore/Updates.swift`):
+  - Homebrew install (`Caskroom/onbud` exists): `brew update && brew upgrade --cask onbud`, then reopens OnBud.
+  - DMG install: downloads `OnBud-<version>.dmg` from the release and compares its SHA-256 with `Casks/onbud.rb`
+    at that tag. On a mismatch nothing is installed. Otherwise the app is replaced, the previous copy goes to the
+    Trash, and OnBud reopens.
+- **Controller:** on the first launch after an update, if the controller in `~/OnBud` is older than the one in
+  the app, OnBud offers Settings > Backend > Update… (asking before each step).
+
 ## Distribution
 
 - **What ships.** `make app` bundles the controller (`bin`, `services`, `policies`, `scripts`, `opencode`,

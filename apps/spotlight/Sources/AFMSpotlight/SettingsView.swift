@@ -74,6 +74,20 @@ struct SettingsView: View {
                     Button("Show Backend…", action: openBackend)
                 }
             }
+            Section("Updates") {
+                Toggle("Check for updates once a day", isOn: Binding(get: { state.checkForUpdates == true }, set: { state.checkForUpdates = $0 }))
+                Text("Asks GitHub for OnBud's latest release (one request to api.github.com, nothing about you or your files). Nothing is installed until you choose Update.")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Text(state.updateStatus ?? "This is OnBud \(state.appVersion).")
+                        .foregroundStyle(state.availableUpdate == nil ? Color.secondary : Color.orange)
+                    Spacer()
+                    if let r = state.availableUpdate {
+                        Button("Update…") { state.offerUpdate(r) }
+                    }
+                    Button("Check now") { Task { await state.checkUpdates(force: true) } }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 580)

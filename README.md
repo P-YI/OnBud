@@ -5,7 +5,7 @@
 <h3 align="center">Apple's on-device model, put to work on your own files.</h3>
 
 <p align="center">
-  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.6-blue" alt="Version 0.2.6"></a>
+  <a href="https://github.com/P-YI/OnBud/releases"><img src="https://img.shields.io/badge/version-0.2.7-blue" alt="Version 0.2.7"></a>
   <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-26%20Tahoe%2B-000000?logo=apple&logoColor=white" alt="macOS 26 Tahoe+"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Apple%20silicon-M1%2B-555555?logo=apple&logoColor=white" alt="Apple silicon"></a>
   <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift"></a>
@@ -50,15 +50,16 @@ nothing leaves it unless you turn on a plugin that says so.
 
 | Version | What's new |
 |---|---|
+| [0.2.7](docs/release-notes-0.2.7.md) | Update check with your consent · one-click update · faster folder search |
 | [0.2.6](docs/release-notes-0.2.6.md) | Stop and Undo buttons · conversions written atomically · missing-folder fallback |
 | [0.2.5](docs/release-notes-0.2.5.md) | Choice buttons instead of guesses · image size targets · PDF merges with page picks · absolute-path answers |
-| [0.2.4](docs/release-notes-0.2.4.md) | Mac actions in plain English are carried out · volume, brightness, Wi-Fi, Bluetooth, Trash and more · vetted recipes |
 
 <details>
 <summary>Earlier releases</summary>
 
 | Version | What's new |
 |---|---|
+| [0.2.4](docs/release-notes-0.2.4.md) | Mac actions in plain English are carried out · volume, brightness, Wi-Fi, Bluetooth, Trash and more · vetted recipes |
 | [0.2.3](docs/release-notes-0.2.3.md) | A path in the request sets the work folder · LaTeX compiles the named file · translation fixes |
 | [0.2.2](docs/release-notes-0.2.2.md) | System Settings panes · Codex usage · quick answers by code · general questions as chat |
 | [0.2.1](docs/release-notes-0.2.1.md) | Architecture diagram in the README |
@@ -100,7 +101,7 @@ brew trust --cask p-yi/onbud/onbud      # Homebrew 7+: allow this one third-part
 brew install --cask p-yi/onbud/onbud
 ```
 
-**DMG:** download `OnBud-0.2.6.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
+**DMG:** download `OnBud-0.2.7.dmg` from [Releases](https://github.com/P-YI/OnBud/releases) and drag
 OnBud to Applications.
 
 > [!NOTE]
@@ -115,7 +116,10 @@ Then open OnBud and click **Set up OnBud…**. Terminal opens and, asking before
 3. copies the controller to `~/OnBud/adaptive-coding-agent`;
 4. starts apfel (`127.0.0.1:11434`) and the controller (`127.0.0.1:11435`) at login.
 
-Update: `brew upgrade --cask onbud` (or a newer DMG), then Settings > Backend > **Update…**.
+**Updates:** if you allow it (OnBud asks once), OnBud checks GitHub once a day for a new release, shows what
+changed, and updates only when you click **Update…**: through Homebrew if you installed with it, otherwise by
+downloading the release and checking it against the published checksum. It then offers to update the controller
+too. By hand: `brew upgrade --cask onbud` (or a newer DMG), then Settings > Backend > **Update…**.
 
 ## Quick start
 

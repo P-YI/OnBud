@@ -218,6 +218,15 @@ test("terminalFolder: home, known folders, explicit paths, named folders; the pr
   const { terminalFolder } = await import("../services/controller/local-skills.ts");
   const H = process.env.HOME!;
   const root = mkdtempSync(join(H, ".onbud-test-")); mkdirSync(join(root, "docs"));
+  // The project is enough here: reading ~/Desktop, ~/Documents or ~/Downloads makes macOS ask for folder access and
+  // the run waits on that dialog (2026-11-25). Such a read fails this test at once instead.
+  const fs = await import("node:fs"), { syncBuiltinESMExports } = await import("node:module");
+  const realReaddir = fs.default.readdirSync, protectedReads: string[] = [];
+  (fs.default as any).readdirSync = function (d: any, ...a: any[]) {
+    if (new RegExp(`^${H}/(Desktop|Documents|Downloads)(/|$)`).test(String(d))) { protectedReads.push(String(d)); throw new Error("protected folder read in a test"); }
+    return realReaddir.call(this, d, ...a);
+  };
+  syncBuiltinESMExports();
   try {
     assert.deepEqual(await terminalFolder("home 디렉토리를 터미널에서 열어줘", root), { dir: H });
     assert.deepEqual(await terminalFolder("open a terminal in my home folder", root), { dir: H });
@@ -232,7 +241,11 @@ test("terminalFolder: home, known folders, explicit paths, named folders; the pr
     assert.deepEqual(await terminalFolder("docs/Orion에서 터미널 열어줘", root), { dir: join(root, "docs", "Orion") });
     assert.deepEqual(await terminalFolder("docs 폴더 안의 ZZZ 디렉토리에 터미널 열어줘", root), { missing: { name: "ZZZ", in: join(root, "docs") } });
     assert.deepEqual(await terminalFolder(`${tmpdir()} 에서 터미널 열어줘`, root), {});   // outside home: not used
-  } finally { (await import("node:fs")).rmSync(root, { recursive: true, force: true }); }
+    assert.deepEqual(protectedReads, []);
+  } finally {
+    (fs.default as any).readdirSync = realReaddir; syncBuiltinESMExports();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("copilot: usage questions and hand-offs to VS Code are detected; how-to questions are not", () => {

@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var windows: [String: NSWindow] = [:]
     private var resizeObservers: [NSObjectProtocol] = []
+    private var updateTimer: Timer?
     var activity: MenuBarActivity!
     var watchRunning: AnyCancellable?
     lazy var hotKey = HotKey { [weak self] in self?.toggle() }
@@ -40,7 +41,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.servicesProvider = self
         NSUpdateDynamicServices()
         if state.notifyWhenDone { state.requestNotificationPermission() }
-        Task { await state.probe() }
+        // Snapshots and other development flags skip the launch prompts (they are modal).
+        let devRun = CommandLine.arguments.contains("--snapshot")
+        Task {
+            await state.probe()
+            guard !devRun else { return }
+            state.offerControllerUpdateIfNeeded()
+            await state.updatesAtLaunch()
+        }
+        // While OnBud stays open: the update check is re-run every 6 hours (it asks GitHub at most once a day).
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.state.updatesAtLaunch() }
+        }
         offerToRemoveOldApp()
         // `open OnBud.app --args --show` (make run) opens the panel right away.
         if CommandLine.arguments.contains("--show") { show() }

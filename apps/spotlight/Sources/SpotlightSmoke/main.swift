@@ -257,6 +257,32 @@ do {
           m["mcp"]?["onbud"] != nil && m["mcp"]?[LegacyMigration.oldMCPName] == nil && m["mcp"]?["other"] != nil, "\(added)")
 } catch { check("upgrade: config link", false, "\(error)") }
 
+// Update check: versions, the GitHub JSON, the notes summary, and the two update scripts (syntax-checked by zsh -n).
+do {
+    check("updates: version order", Updates.isNewer("0.2.10", than: "0.2.9") && Updates.isNewer("v0.3", than: "0.2.6")
+          && !Updates.isNewer("0.2.6", than: "0.2.6") && !Updates.isNewer("0.2.5", than: "0.2.6") && !Updates.isNewer("beta", than: "0.1"))
+    let json = ##"{"tag_name":"v0.2.7","html_url":"https://github.com/P-YI/OnBud/releases/tag/v0.2.7","body":"# OnBud 0.2.7\n\nIntro.\n\n## Changes\n- **Updates:** checked daily\n  after you allow it.\n- Faster.\n\n## Upgrade\nbrew","assets":[{"browser_download_url":"https://github.com/P-YI/OnBud/releases/download/v0.2.7/OnBud-0.2.7.dmg"},{"browser_download_url":"https://evil.example/OnBud-0.2.7.dmg"}]}"##
+    let r = Updates.parseLatest(Data(json.utf8))
+    check("updates: latest release parsed (github.com DMG only)", r?.version == "0.2.7" && r?.dmgURL?.host == "github.com"
+          && r?.summary == "• Updates: checked daily after you allow it.\n• Faster.", "\(String(describing: r))")
+    check("updates: other hosts and odd tags refused",
+          Updates.parseLatest(Data(#"{"tag_name":"v1.0","html_url":"https://evil.example/x"}"#.utf8)) == nil
+          && Updates.parseLatest(Data(#"{"tag_name":"latest","html_url":"https://github.com/P-YI/OnBud"}"#.utf8)) == nil)
+    if let r {
+        var ok = true
+        for brew in [true, false] {
+            let script = Updates.script(for: r, appPath: "/Applications/OnBud.app", homebrew: brew)
+            let f = FileManager.default.temporaryDirectory.appendingPathComponent("onbud-update-\(UUID().uuidString.prefix(6)).zsh")
+            try script.write(to: f, atomically: true, encoding: .utf8)
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/zsh"); p.arguments = ["-n", f.path]
+            try p.run(); p.waitUntilExit(); try? FileManager.default.removeItem(at: f)
+            ok = ok && p.terminationStatus == 0 && !script.contains("rm -rf")
+                && (brew ? script.contains("upgrade --cask onbud") : script.contains("shasum -a 256") && script.contains(".Trash"))
+        }
+        check("updates: Homebrew and DMG scripts parse; DMG checks the checksum and keeps the old app", ok)
+    }
+} catch { check("updates: setup", false, "\(error)") }
+
 // MARK: 2. live
 
 let status = await Backend.probe(paths: paths)

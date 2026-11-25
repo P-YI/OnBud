@@ -60,6 +60,11 @@ final class AppState: ObservableObject {
     @Published var routerModels: [RouterModel] = []
     @Published var routerModel: String { didSet { defaults.set(routerModel, forKey: "routerModel") } }
     @Published var widgetShowsChat: Bool { didSet { defaults.set(widgetShowsChat, forKey: "widgetShowsChat"); updateWidget() } }
+    /** Update check: nil until the user answered the one-time question, then their choice (Settings > Updates). */
+    @Published var checkForUpdates: Bool? { didSet { if let v = checkForUpdates { defaults.set(v, forKey: "checkForUpdates") } } }
+    /** A newer release found by the last check. */
+    @Published var availableUpdate: Updates.Release?
+    @Published var updateStatus: String?
 
     var onHotKeyChange: ((HotKeyChoice) -> Void)?
     var isPanelVisible: () -> Bool = { true }
@@ -78,6 +83,7 @@ final class AppState: ObservableObject {
         notifyWhenDone = defaults.object(forKey: "notifyWhenDone") as? Bool ?? true
         routerModel = defaults.string(forKey: "routerModel") ?? "decima:agent"
         widgetShowsChat = defaults.object(forKey: "widgetShowsChat") as? Bool ?? true
+        checkForUpdates = defaults.object(forKey: "checkForUpdates") as? Bool
         recentFolders = (defaults.stringArray(forKey: "recentFolders") ?? []).filter { ProjectFolder.problem($0) == nil }
         // Default project folder: ~/Desktop (the user can pick another one in the panel).
         let saved = defaults.string(forKey: "projectFolder")
@@ -382,6 +388,83 @@ final class AppState: ObservableObject {
             notice = "Not opened: \(url.scheme ?? "this") links are not followed."
             return .handled
         }
+    }
+
+    // MARK: updates (Updates.swift: one GET to GitHub's latest release, at most daily, only when allowed)
+
+    var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
+
+    /** Asks GitHub for the latest release; `force` ignores the once-a-day limit (Check now). */
+    @discardableResult
+    func checkUpdates(force: Bool = false) async -> Updates.Release? {
+        guard force || checkForUpdates == true else { return nil }
+        let last = defaults.double(forKey: "lastUpdateCheck")
+        if !force, last > 0, Date().timeIntervalSince1970 - last < Updates.checkInterval { return availableUpdate }
+        var req = URLRequest(url: Updates.latestURL, timeoutInterval: 15)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("OnBud/\(appVersion)", forHTTPHeaderField: "User-Agent")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200,
+              let r = Updates.parseLatest(data) else {
+            updateStatus = "Could not reach GitHub to check for updates."
+            return nil
+        }
+        defaults.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheck")
+        let time = Date().formatted(date: .abbreviated, time: .shortened)
+        if Updates.isNewer(r.version, than: appVersion) {
+            availableUpdate = r
+            updateStatus = "OnBud \(r.version) is available (this is \(appVersion)) · checked \(time)"
+        } else {
+            availableUpdate = nil
+            updateStatus = "Up to date (\(appVersion)) · checked \(time)"
+        }
+        return availableUpdate
+    }
+
+    /** Shows the new version and what changed; on "Update…" runs the visible update script in Terminal. */
+    func offerUpdate(_ r: Updates.Release) {
+        let homebrew = Updates.installedWithHomebrew()
+        let a = NSAlert()
+        a.messageText = "OnBud \(r.version) is available"
+        a.informativeText = "You have \(appVersion).\n\n" + (r.summary.isEmpty ? "" : r.summary + "\n\n")
+            + (homebrew ? "Update runs `brew upgrade --cask onbud` in Terminal, then reopens OnBud."
+                        : "Update downloads the release from GitHub in Terminal, checks it against the published checksum, replaces OnBud (the old app goes to the Trash) and reopens it.")
+        a.addButton(withTitle: "Update…"); a.addButton(withTitle: "Release notes"); a.addButton(withTitle: "Later")
+        NSApp.activate()
+        switch a.runModal() {
+        case .alertFirstButtonReturn:
+            runInTerminal(Updates.script(for: r, appPath: Bundle.main.bundlePath, homebrew: homebrew), prefix: "onbud-update-")
+            notice = "Updating OnBud to \(r.version) in Terminal. OnBud quits and reopens when it is done."
+        case .alertSecondButtonReturn:
+            NSWorkspace.shared.open(r.notesURL)
+        default: break
+        }
+    }
+
+    /** At launch: the one-time question, then a due check; a new version is announced once (Settings keeps it). */
+    func updatesAtLaunch() async {
+        if checkForUpdates == nil {
+            let a = NSAlert()
+            a.messageText = "Check for OnBud updates?"
+            a.informativeText = "Once a day OnBud can ask GitHub for its latest release: one request to api.github.com, with nothing about you or your files. When a new version is out, OnBud shows what changed and updates only if you agree. You can change this in Settings > Updates."
+            a.addButton(withTitle: "Check daily"); a.addButton(withTitle: "Not now")
+            NSApp.activate()
+            checkForUpdates = a.runModal() == .alertFirstButtonReturn
+        }
+        guard let r = await checkUpdates(), defaults.string(forKey: "announcedUpdate") != r.version else { return }
+        defaults.set(r.version, forKey: "announcedUpdate")
+        offerUpdate(r)
+    }
+
+    /** After an update: the controller copy is older than the one in this app → offer Backend's Update once per version. */
+    func offerControllerUpdateIfNeeded() {
+        guard backendOutdated, defaults.string(forKey: "controllerUpdateOffered") != appVersion else { return }
+        defaults.set(appVersion, forKey: "controllerUpdateOffered")
+        let a = NSAlert()
+        a.messageText = "Update the controller too?"
+        a.informativeText = "OnBud \(appVersion) carries a newer controller than the one installed in ~/OnBud. Update copies it there in Terminal (asking before each step), like Settings > Backend > Update…."
+        a.addButton(withTitle: "Update…"); a.addButton(withTitle: "Later")
+        NSApp.activate()
+        if a.runModal() == .alertFirstButtonReturn { runSetup() }
     }
 
     // MARK: notifications
